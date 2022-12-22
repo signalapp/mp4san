@@ -1,0 +1,47 @@
+name: test
+on: [push]
+
+defaults:
+  run:
+    shell: bash
+jobs:
+  build-and-test:
+    name: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v3
+
+      - name: cache cargo output
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+
+      - name: cargo check
+        run:  cargo check --verbose
+
+      - name: cargo build
+        run:  cargo build --verbose
+
+      - name: cargo test
+        run:  cargo test --verbose
+
+      - name: cargo clippy
+        uses: actions-rs/clippy-check@v1
+        with:
+          token: ${{ github.token }}
+
+  format-check:
+    name: format-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v3
+
+      - name: cargo fmt --check
+        run:  cargo fmt --check

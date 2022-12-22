@@ -1,0 +1,57 @@
+name: gh-pages
+on:
+  push:
+    branches:
+      - master
+      - docs
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+defaults:
+  run:
+    shell: bash
+jobs:
+  gh-pages:
+    name:    gh-pages
+    runs-on: ubuntu-latest
+    environment:
+      name: gh-pages
+    steps:
+      - name: checkout
+        uses: actions/checkout@v3
+
+      - name: cache cargo output
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+
+      - name: create docs directory
+        run:  mkdir -p docs
+
+      - name: cargo doc
+        run:  cargo doc --lib --no-deps
+
+      - name: move public docs to docs folder
+        run:  mv target/doc/ docs/public/
+
+      - name: cargo doc
+        run:  cargo doc --lib --no-deps --document-private-items
+
+      - name: move private docs to docs folder
+        run:  mv target/doc/ docs/private/
+
+      - name: upload docs artifact
+        uses: actions/upload-pages-artifact@v1
+        with:
+          path: docs
+
+      - name: deploy docs to github pages
+        uses: actions/deploy-pages@v1
