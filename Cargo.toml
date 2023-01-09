@@ -1,3 +1,3 @@
 [workspace]
-members = ["mp4san"]
+members = ["cli", "mp4san"]
 resolver = "2"
