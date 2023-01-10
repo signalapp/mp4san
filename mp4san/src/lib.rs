@@ -1,6 +1,6 @@
 use std::io::{self, BufRead, BufReader, Read, Seek};
 
-use mp4::{skip_box, BoxHeader, BoxType, FtypBox, MoovBox, ReadBox};
+use mp4::{skip_box, BoxHeader, BoxType, FourCC, FtypBox, MoovBox, ReadBox};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -8,6 +8,8 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("Parse error: {0}")]
     Parse(#[from] mp4::Error),
+    #[error("Unsupported format: {0}")]
+    UnsupportedFormat(FourCC),
 }
 
 pub fn sanitize<R: Read + Seek>(input: R) -> Result<(), Error> {
@@ -59,8 +61,11 @@ pub fn sanitize<R: Read + Seek>(input: R) -> Result<(), Error> {
         }
     }
 
-    let Some(_ftyp) = ftyp else {
+    let Some(ftyp) = ftyp else {
         return Err(Error::Parse(mp4::Error::BoxNotFound(BoxType::FtypBox)));
+    };
+    let FtypBox { major_brand: FourCC { value: [b'm', b'p', b'4', b'1' | b'2'] }, .. } = ftyp else {
+        return Err(Error::UnsupportedFormat(ftyp.major_brand));
     };
     let Some(_moov) = moov else {
         return Err(Error::Parse(mp4::Error::BoxNotFound(BoxType::MoovBox)));
@@ -78,12 +83,16 @@ mod test {
     #[test]
     fn zero_size_box() {
         let mut data = vec![];
-        FtypBox::default().write_box(&mut data).unwrap();
+
+        let ftyp = FtypBox { major_brand: (*b"mp42").into(), ..Default::default() };
+        ftyp.write_box(&mut data).unwrap();
+
         let moov_pos = data.len();
         MoovBox::default().write_box(&mut data).unwrap();
         let mut header = BoxHeader::read(&mut &data[moov_pos..]).unwrap();
         header.size = 0;
         header.write(&mut &mut data[moov_pos..]).unwrap();
+
         sanitize(io::Cursor::new(data)).unwrap();
     }
 }
