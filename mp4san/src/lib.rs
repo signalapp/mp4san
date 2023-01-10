@@ -48,7 +48,7 @@ pub fn sanitize<R: Read + Seek>(input: R) -> Result<(), Error> {
             }
             BoxType::MdatBox => {
                 skip_box(&mut reader, size)?;
-                log::info!("free: {size} bytes");
+                log::info!("mdat: {size} bytes");
             }
             BoxType::MoovBox => {
                 let read_moov = MoovBox::read_box(&mut reader, size)?;
