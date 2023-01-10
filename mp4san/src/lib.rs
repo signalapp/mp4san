@@ -1,7 +1,6 @@
-use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, Read, Seek};
 
-use mp4::{skip_box, BoxHeader, BoxType, EmsgBox, FtypBox, MoofBox, MoovBox, Mp4Track, ReadBox};
+use mp4::{skip_box, BoxHeader, BoxType, FtypBox, MoovBox, ReadBox};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -16,8 +15,6 @@ pub fn sanitize<R: Read + Seek>(input: R) -> Result<(), Error> {
 
     let mut ftyp = None;
     let mut moov = None;
-    let mut moofs = Vec::new();
-    let mut emsgs = Vec::new();
 
     while !reader.fill_buf()?.is_empty() {
         let start_pos = reader.stream_position()?;
@@ -55,16 +52,6 @@ pub fn sanitize<R: Read + Seek>(input: R) -> Result<(), Error> {
                 log::info!("moov: {read_moov:#?}");
                 moov = Some(read_moov);
             }
-            BoxType::MoofBox => {
-                let moof = MoofBox::read_box(&mut reader, size)?;
-                log::info!("moov: {moof:#?}");
-                moofs.push(moof);
-            }
-            BoxType::EmsgBox => {
-                let emsg = EmsgBox::read_box(&mut reader, size)?;
-                log::info!("moov: {emsg:#?}");
-                emsgs.push(emsg);
-            }
             _ => {
                 skip_box(&mut reader, size)?;
                 log::info!("{name}: {size} bytes");
@@ -75,35 +62,9 @@ pub fn sanitize<R: Read + Seek>(input: R) -> Result<(), Error> {
     let Some(_ftyp) = ftyp else {
         return Err(Error::Parse(mp4::Error::BoxNotFound(BoxType::FtypBox)));
     };
-    let Some(moov) = moov else {
+    let Some(_moov) = moov else {
         return Err(Error::Parse(mp4::Error::BoxNotFound(BoxType::MoovBox)));
     };
-
-    if moov.traks.iter().any(|trak| trak.tkhd.track_id == 0) {}
-    let mut tracks: HashMap<_, Mp4Track> = moov
-        .traks
-        .iter()
-        .map(|trak| match trak.tkhd.track_id {
-            0 => Err(Error::Parse(mp4::Error::InvalidData("illegal track id 0"))),
-            _ => {
-                let track = Mp4Track { trak: trak.clone(), trafs: Vec::new(), default_sample_duration: 0 };
-                Ok((trak.tkhd.track_id, track))
-            }
-        })
-        .collect::<Result<_, _>>()?;
-
-    let default_sample_duration = match moov.mvex {
-        Some(mvex) => mvex.trex.default_sample_duration,
-        None => 0,
-    };
-
-    for traf in moofs.iter().flat_map(|moof| &moof.trafs) {
-        let Some(track) = tracks.get_mut(&traf.tfhd.track_id) else {
-            return Err(Error::Parse(mp4::Error::TrakNotFound(traf.tfhd.track_id)));
-        };
-        track.default_sample_duration = default_sample_duration;
-        track.trafs.push(traf.clone())
-    }
 
     Ok(())
 }
