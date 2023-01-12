@@ -19,7 +19,7 @@ pub enum Error {
 }
 
 pub struct SanitizedMetadata {
-    pub metadata: Box<[u8]>,
+    pub metadata: Vec<u8>,
     pub data: InputSpan,
 }
 
@@ -153,16 +153,13 @@ pub fn sanitize<R: Read + Seek>(input: R) -> Result<SanitizedMetadata, Error> {
         }
     }
 
-    let metadata = {
-        let mut metadata = Vec::with_capacity((metadata_len + pad_size) as usize);
-        ftyp.write_box(&mut metadata)?;
-        moov.write_box(&mut metadata)?;
-        if pad_size != 0 {
-            BoxHeader { name: BoxType::FreeBox, size: pad_size }.write(&mut metadata)?;
-            metadata.resize((metadata_len + pad_size) as usize, 0);
-        }
-        metadata.into_boxed_slice()
-    };
+    let mut metadata = Vec::with_capacity((metadata_len + pad_size) as usize);
+    ftyp.write_box(&mut metadata)?;
+    moov.write_box(&mut metadata)?;
+    if pad_size != 0 {
+        BoxHeader { name: BoxType::FreeBox, size: pad_size }.write(&mut metadata)?;
+        metadata.resize((metadata_len + pad_size) as usize, 0);
+    }
 
     Ok(SanitizedMetadata { metadata, data })
 }
