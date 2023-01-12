@@ -28,6 +28,8 @@ pub struct InputSpan {
     pub len: u64,
 }
 
+pub const COMPATIBLE_BRAND: FourCC = FourCC { value: *b"isom" };
+
 pub fn sanitize<R: Read + Seek>(input: R) -> Result<SanitizedMetadata, Error> {
     let mut reader = BufReader::new(input);
 
@@ -73,6 +75,11 @@ pub fn sanitize<R: Read + Seek>(input: R) -> Result<SanitizedMetadata, Error> {
                 log::info!("ftyp: {read_ftyp:#?}");
                 ftyp = Some(read_ftyp);
             }
+
+            // NB: ISO 14496-12-2012 specifies a default ftyp, but we don't currently use it. The spec says that it
+            // contains a single compatible brand, "mp41", and notably not "isom" which is the ISO spec we follow for
+            // parsing now. This implies that there's additional stuff in "mp41" which is not in "isom". "mp41" is also
+            // very old at this point, so it'll require additional research/work to be able to parse/remux it.
             _ if ftyp.is_none() => return Err(Error::InvalidBoxLayout("ftyp is not the first significant box")),
 
             BoxType::MdatBox => {
@@ -105,7 +112,7 @@ pub fn sanitize<R: Read + Seek>(input: R) -> Result<SanitizedMetadata, Error> {
     let Some(ftyp) = ftyp else {
         return Err(Error::Parse(mp4::Error::BoxNotFound(BoxType::FtypBox)));
     };
-    let FtypBox { major_brand: FourCC { value: [b'm', b'p', b'4', b'1' | b'2'] }, .. } = ftyp else {
+    if !ftyp.compatible_brands.contains(&COMPATIBLE_BRAND) {
         return Err(Error::UnsupportedFormat(ftyp.major_brand));
     };
     let Some(mut moov) = moov else {
@@ -166,12 +173,15 @@ mod test {
 
     use super::*;
 
+    fn test_ftyp() -> FtypBox {
+        FtypBox { major_brand: COMPATIBLE_BRAND, minor_version: 0, compatible_brands: vec![COMPATIBLE_BRAND] }
+    }
+
     #[test]
     fn zero_size_box() {
         let mut data = vec![];
 
-        let ftyp = FtypBox { major_brand: (*b"mp42").into(), ..Default::default() };
-        ftyp.write_box(&mut data).unwrap();
+        test_ftyp().write_box(&mut data).unwrap();
 
         BoxHeader { name: BoxType::MdatBox, size: 9 }.write(&mut data).unwrap();
         data.push(b'A');
