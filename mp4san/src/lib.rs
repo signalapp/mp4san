@@ -59,7 +59,7 @@ pub fn sanitize<R: Read + Seek>(input: R) -> Result<SanitizedMetadata, Error> {
         match name {
             BoxType::FreeBox => {
                 skip_box(&mut reader, box_size)?;
-                log::info!("free: {box_size} bytes");
+                log::info!("free @ 0x{start_pos:08x}: {box_size} bytes");
 
                 // Try to extend any already accumulated data in case there's more mdat boxes to come.
                 if let Some(data) = &mut data {
@@ -72,7 +72,7 @@ pub fn sanitize<R: Read + Seek>(input: R) -> Result<SanitizedMetadata, Error> {
             BoxType::FtypBox if ftyp.is_some() => return Err(Error::InvalidBoxLayout("multiple ftyp boxes")),
             BoxType::FtypBox => {
                 let read_ftyp = FtypBox::read_box(&mut reader, box_size)?;
-                log::info!("ftyp: {read_ftyp:#?}");
+                log::info!("ftyp @ 0x{start_pos:08x}: {read_ftyp:#?}");
                 ftyp = Some(read_ftyp);
             }
 
@@ -84,7 +84,7 @@ pub fn sanitize<R: Read + Seek>(input: R) -> Result<SanitizedMetadata, Error> {
 
             BoxType::MdatBox => {
                 skip_box(&mut reader, box_size)?;
-                log::info!("mdat: {box_size} bytes");
+                log::info!("mdat @ 0x{start_pos:08x}: {box_size} bytes");
 
                 if let Some(data) = &mut data {
                     // Try to extend already accumulated data.
@@ -98,12 +98,12 @@ pub fn sanitize<R: Read + Seek>(input: R) -> Result<SanitizedMetadata, Error> {
             }
             BoxType::MoovBox => {
                 let read_moov = MoovBox::read_box(&mut reader, box_size)?;
-                log::info!("moov: {read_moov:#?}");
+                log::info!("moov @ 0x{start_pos:08x}: {read_moov:#?}");
 
                 moov = Some(read_moov);
             }
             _ => {
-                log::info!("{name}: {box_size} bytes");
+                log::info!("{name} @ 0x{start_pos:08x}: {box_size} bytes");
                 return Err(Error::UnsupportedBox(name));
             }
         }

@@ -1,0 +1,12 @@
+[package]
+name = "mp4san-test-gen"
+edition = "2021"
+version = "0.1.0"
+
+[dependencies]
+anyhow = "1.0.68"
+clap = { version = "4.0.32", features = ["derive"] }
+env_logger = "0.10.0"
+libflate = "1.2.0"
+log = "0.4.17"
+mp4 = "0.12.0"
