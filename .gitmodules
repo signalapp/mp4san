@@ -1,0 +1,3 @@
+[submodule "mp4san/tests/test-data"]
+	path = mp4san/tests/test-data
+	url = git@github.com:privacyresearchgroup/mp4san-test-data.git

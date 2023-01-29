@@ -8,9 +8,21 @@ jobs:
   build-and-test:
     name: build-and-test
     runs-on: ubuntu-latest
+    env:
+      TEST_DATA_SSH_KEY: ${{ secrets.TEST_DATA_SSH_KEY }}
     steps:
       - name: checkout
         uses: actions/checkout@v3
+
+      - name: checkout test-data submodule
+        continue-on-error: true
+        if: ${{ env.TEST_DATA_SSH_KEY != '' }}
+        env:
+          SSH_KEY: ${{ env.TEST_DATA_SSH_KEY }}
+        run: |
+          eval `ssh-agent`
+          ssh-add - <<< "${SSH_KEY}"
+          git submodule update --init mp4san/tests/test-data
 
       - name: cache cargo output
         uses: actions/cache@v3
@@ -28,8 +40,13 @@ jobs:
       - name: cargo build
         run:  cargo build --verbose
 
-      - name: cargo test
-        run:  cargo test --verbose
+      - name: cargo test -- --skip test_data
+        run:  cargo test --verbose -- --skip test_data
+
+      - name: cargo test test_data
+        continue-on-error: true
+        if: ${{ env.TEST_DATA_SSH_KEY != '' }}
+        run:  cargo test --verbose test_data -- --show-output
 
       - name: cargo clippy
         uses: actions-rs/clippy-check@v1
