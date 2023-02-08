@@ -25,7 +25,6 @@ fn main() -> Result<(), anyhow::Error> {
     let input = File::open(&args.input).context("Error opening input file")?;
 
     let output = File::create(&args.output).context("Error opening output file")?;
-    output.set_len(0).context("Error truncating output file")?;
 
     let mut reader = BufReader::new(input);
     let mut encoder = gzip::Encoder::new(BufWriter::new(output)).context("Error writing to output")?;
