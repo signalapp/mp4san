@@ -1,3 +1,4 @@
+#![allow(clippy::redundant_pattern_matching)]
 mod buffer;
 mod util;
 
@@ -81,12 +82,12 @@ pub fn sanitize<R: Read + Seek>(input: R) -> Result<SanitizedMetadata, Error> {
                 reader.consume(reader.buffer().len());
             }
             SanitizerState::NeedsSkip(skip_amount) => {
-                let old_pos = reader.seek(io::SeekFrom::Current(0))?;
+                let old_pos = reader.stream_position()?;
                 reader.seek(io::SeekFrom::Start(old_pos + skip_amount))?;
                 state = sanitizer.skip_data(skip_amount)?;
             }
             SanitizerState::NeedsSkipToEnd => {
-                let old_pos = reader.seek(io::SeekFrom::Current(0))?;
+                let old_pos = reader.stream_position()?;
                 let end_pos = reader.seek(io::SeekFrom::End(0))?;
                 if end_pos - old_pos != 0 {
                     sanitizer.skip_data(end_pos - old_pos)?;
