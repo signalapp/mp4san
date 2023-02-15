@@ -13,7 +13,7 @@ use crate::Error;
 ///
 /// [Appended](Self::append_input) input data can be read or seeked over using the [`Read` adapter](Self::reader), while
 /// skipped input data can only be seeked over.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Buffer {
     /// The buffer of data, which can be in one of two [states](BufferState).
     state: BufferState,
@@ -21,8 +21,8 @@ pub struct Buffer {
     /// The starting input position of the beginning of [`buffer`](Self::buffer).
     input_pos: u64,
 
-    /// Whether the end of input has been [signaled](Self::finish_input) as being reached.
-    finished: bool,
+    /// The known total length of the input.
+    input_len: u64,
 }
 
 /// A [`Buffer`] adapter implementing [`Read`] and [`Seek`].
@@ -57,11 +57,14 @@ enum BufferState {
 //
 
 impl Buffer {
+    /// Construct a new `Buffer` with a given known total input length.
+    pub fn new(input_len: u64) -> Self {
+        Self { state: Default::default(), input_len, input_pos: 0 }
+    }
+
     /// Append a chunk of input data.
     pub fn append_input(&mut self, new_data: &[u8]) -> Result<(), Error> {
-        if let None = self.end_input_pos().checked_add(new_data.len() as u64) {
-            return Err(Error::InvalidInput("input length overflow"));
-        }
+        self.validate_input_len(new_data.len() as u64)?;
         match &mut self.state {
             BufferState::Reading { data } => data.extend_from_slice(new_data),
             BufferState::Skipping { skipped, .. } => {
@@ -79,9 +82,7 @@ impl Buffer {
     /// As currently implemented, once this method is called, any data [appended](Self::append_input) will be skipped
     /// over as well, until the buffer is [exhausted](Self::is_empty).
     pub fn skip_input(&mut self, amount: u64) -> Result<(), Error> {
-        if let None = self.end_input_pos().checked_add(amount) {
-            return Err(Error::InvalidInput("input length overflow"));
-        }
+        self.validate_input_len(amount)?;
         match &mut self.state {
             BufferState::Reading { data } => {
                 if let Some(skipped) = NonZeroU64::new(amount) {
@@ -95,11 +96,6 @@ impl Buffer {
         Ok(())
     }
 
-    /// Signal that the end of input has been reached.
-    pub fn finish_input(&mut self) {
-        self.finished = true;
-    }
-
     /// Return the input position of the end of this buffer, i.e. the starting input position of the buffer plus the
     /// buffer length.
     pub fn end_input_pos(&self) -> u64 {
@@ -108,9 +104,9 @@ impl Buffer {
             .expect("unexpected input length overflow")
     }
 
-    /// Return whether the end of input has been [signaled](Self::finish_input) as being reached.
-    pub fn finished(&self) -> bool {
-        self.finished
+    /// The known total length of the input, including input has not yet been appended to the buffer.
+    pub fn input_len(&self) -> u64 {
+        self.input_len
     }
 
     /// Return whether the buffer has no data [remaining](Self::remaining) to be [read](Read::read) or [seeked](Seek::seek) over.
@@ -123,9 +119,9 @@ impl Buffer {
     /// The returned [`Reader`] will only consume data from this buffer once [`commit`](Reader::commit) is called. If
     /// the `Reader` is instead simply dropped, `self` will be unmodified.
     ///
-    /// If this `Buffer` is not [finished](Self::finish_input), the returned adapter will return an [`io::Error`] with a
-    /// [kind](io::Error::kind) of [`UnexpectedEof`](io::ErrorKind::UnexpectedEof) if a [read](Read::read) or
-    /// [seek](Seek::seek) is attempted beyond the extent of the buffer.
+    /// The returned adapter will return an [`io::Error`] with a [kind](io::Error::kind) of
+    /// [`UnexpectedEof`](io::ErrorKind::UnexpectedEof) if a [read](Read::read) or [seek](Seek::seek) is attempted
+    /// beyond the extent of the buffer.
     pub fn reader(&mut self) -> Reader<'_> {
         Reader { new_state: self.state.clone(), buffer: self }
     }
@@ -133,6 +129,16 @@ impl Buffer {
     /// Return how much data the buffer has remaining to be either [read](Read::read) or [seeked](Seek::seek) over.
     pub fn remaining(&self) -> u64 {
         self.state.remaining()
+    }
+
+    fn validate_input_len(&self, append_amount: u64) -> Result<(), Error> {
+        match self.end_input_pos().checked_add(append_amount) {
+            None => Err(Error::InvalidInput("input length overflow")),
+            Some(new_end_input_pos) if new_end_input_pos > self.input_len => {
+                Err(Error::InvalidInput("initial input length exceeded"))
+            }
+            Some(_) => Ok(()),
+        }
     }
 }
 
@@ -190,13 +196,13 @@ impl Seek for Reader<'_> {
         let absolute_seek_pos = match seek_from {
             io::SeekFrom::Start(absolute_seek_pos) => absolute_seek_pos,
             io::SeekFrom::End(relative_seek_amount) => {
-                if !self.buffer.finished {
+                let end_pos = self.buffer.end_input_pos();
+                if end_pos < self.buffer.input_len {
                     return Err(io::Error::new(
                         io::ErrorKind::UnexpectedEof,
                         "sanitizer buffer seek from end before input finished",
                     ));
                 }
-                let end_pos = self.buffer.end_input_pos();
                 checked_add_signed(end_pos, relative_seek_amount).ok_or(Error::InvalidInput("input length overflow"))?
             }
             io::SeekFrom::Current(relative_seek_amount) => checked_add_signed(input_pos, relative_seek_amount)

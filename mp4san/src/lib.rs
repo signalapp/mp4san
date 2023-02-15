@@ -4,6 +4,7 @@ mod util;
 
 use std::io::{self, BufRead, BufReader, Read, Seek};
 use std::mem::replace;
+use std::num::NonZeroU64;
 use std::ops::ControlFlow;
 use std::ops::ControlFlow::{Break, Continue};
 
@@ -12,7 +13,7 @@ use util::checked_add_signed;
 
 use crate::buffer::Buffer;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Sanitizer {
     buffer: Buffer,
 
@@ -33,8 +34,7 @@ pub struct Sanitizer {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SanitizerState {
     NeedsData,
-    NeedsSkip(u64),
-    NeedsSkipToEnd,
+    NeedsSkip(NonZeroU64),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -69,13 +69,17 @@ pub struct InputSpan {
 
 pub const COMPATIBLE_BRAND: FourCC = FourCC { value: *b"isom" };
 
-pub fn sanitize<R: Read + Seek>(input: R) -> Result<SanitizedMetadata, Error> {
+pub fn sanitize<R: Read + Seek>(mut input: R) -> Result<SanitizedMetadata, Error> {
+    let start_pos = input.stream_position()?;
+    let input_len = input.seek(io::SeekFrom::End(0))?;
+    input.seek(io::SeekFrom::Start(start_pos))?;
+
     let mut reader = BufReader::new(input);
-    let mut sanitizer = Sanitizer::new();
+    let mut sanitizer = Sanitizer::new(input_len);
     let mut state = SanitizerState::default();
     loop {
         match state {
-            SanitizerState::NeedsData | SanitizerState::NeedsSkip(0) => {
+            SanitizerState::NeedsData => {
                 if reader.fill_buf()?.is_empty() {
                     break;
                 }
@@ -84,16 +88,8 @@ pub fn sanitize<R: Read + Seek>(input: R) -> Result<SanitizedMetadata, Error> {
             }
             SanitizerState::NeedsSkip(skip_amount) => {
                 let old_pos = reader.stream_position()?;
-                reader.seek(io::SeekFrom::Start(old_pos + skip_amount))?;
-                state = sanitizer.skip_data(skip_amount)?;
-            }
-            SanitizerState::NeedsSkipToEnd => {
-                let old_pos = reader.stream_position()?;
-                let end_pos = reader.seek(io::SeekFrom::End(0))?;
-                if end_pos - old_pos != 0 {
-                    sanitizer.skip_data(end_pos - old_pos)?;
-                }
-                break;
+                reader.seek(io::SeekFrom::Start(old_pos + skip_amount.get()))?;
+                state = sanitizer.skip_data(skip_amount.get())?;
             }
         }
     }
@@ -103,8 +99,8 @@ pub fn sanitize<R: Read + Seek>(input: R) -> Result<SanitizedMetadata, Error> {
 
 impl Sanitizer {
     /// Construct a new `Sanitizer`.
-    pub fn new() -> Self {
-        Default::default()
+    pub fn new(input_len: u64) -> Self {
+        Self { buffer: Buffer::new(input_len), ftyp: None, moov: None, data: None, sanitized: false }
     }
 
     /// Process the next chunk of input data.
@@ -140,11 +136,9 @@ impl Sanitizer {
             "finishing input at 0x{end_input_pos:08x}",
             end_input_pos = self.buffer.end_input_pos()
         );
-        self.buffer.finish_input();
         match self.process_buffer()? {
-            SanitizerState::NeedsSkip(0) | SanitizerState::NeedsData => self.sanitize(),
-            SanitizerState::NeedsSkip(1..) => Err(Error::from(io::Error::from(io::ErrorKind::UnexpectedEof))),
-            SanitizerState::NeedsSkipToEnd => unreachable!(),
+            SanitizerState::NeedsData => self.sanitize(),
+            SanitizerState::NeedsSkip { .. } => Err(Error::from(io::Error::from(io::ErrorKind::UnexpectedEof))),
         }
     }
 
@@ -157,14 +151,10 @@ impl Sanitizer {
                     log::debug!("requesting skip of {need_skip_amount} input bytes");
                     return Ok(SanitizerState::NeedsSkip(need_skip_amount));
                 }
-                Ok(Break(SanitizerState::NeedsSkipToEnd)) => {
-                    log::debug!("requesting skip to end of input");
-                    return Ok(SanitizerState::NeedsSkipToEnd);
-                }
                 Ok(Break(SanitizerState::NeedsData)) => return Ok(SanitizerState::NeedsData),
 
                 Err(Error::Parse(mp4::Error::IoError(err))) | Err(Error::Io(err))
-                    if matches!(err.kind(), io::ErrorKind::UnexpectedEof) && !self.buffer.finished() =>
+                    if matches!(err.kind(), io::ErrorKind::UnexpectedEof) =>
                 {
                     return Ok(SanitizerState::NeedsData);
                 }
@@ -182,22 +172,13 @@ impl Sanitizer {
         // NB: Only pass `size` to other `mp4` functions and don't rely on it to be meaningful; BoxHeader actually
         // subtracts HEADER_SIZE from size in the 64-bit box size case as a hack.
         let BoxHeader { name, size: header_box_size } = BoxHeader::read(&mut reader)?;
-        let actual_box_size = |reader: &mut buffer::Reader<'_>| match header_box_size {
+        let box_size = match header_box_size {
             0 => {
-                let input_pos = reader.stream_position()?;
-
-                // This is the unstable Seek::stream_len()
-                let input_len = reader.seek(io::SeekFrom::End(0))?;
-
-                if input_pos != input_len {
-                    reader.seek(io::SeekFrom::Start(input_pos))?;
-                }
-
-                let measured_box_size = input_len - start_pos;
+                let measured_box_size = reader.get_ref().input_len() - start_pos;
                 log::info!("last box size: {measured_box_size}");
-                Ok::<_, Error>(measured_box_size)
+                measured_box_size
             }
-            box_size => Ok(box_size),
+            box_size => box_size,
         };
 
         match name {
@@ -206,7 +187,6 @@ impl Sanitizer {
                     return Ok(Break(state));
                 }
 
-                let box_size = actual_box_size(&mut reader)?;
                 log::info!("free @ 0x{start_pos:08x}: {box_size} bytes");
 
                 // Try to extend any already accumulated data in case there's more mdat boxes to come.
@@ -219,7 +199,6 @@ impl Sanitizer {
 
             BoxType::FtypBox if self.ftyp.is_some() => return Err(Error::InvalidBoxLayout("multiple ftyp boxes")),
             BoxType::FtypBox => {
-                let box_size = actual_box_size(&mut reader)?;
                 let read_ftyp = FtypBox::read_box(&mut reader, box_size)?;
                 log::info!("ftyp @ 0x{start_pos:08x}: {read_ftyp:#?}");
                 self.ftyp = Some(read_ftyp);
@@ -236,7 +215,6 @@ impl Sanitizer {
                     return Ok(Break(state));
                 }
 
-                let box_size = actual_box_size(&mut reader)?;
                 log::info!("mdat @ 0x{start_pos:08x}: {box_size} bytes");
 
                 if let Some(data) = &mut self.data {
@@ -250,14 +228,11 @@ impl Sanitizer {
                 }
             }
             BoxType::MoovBox => {
-                let box_size = actual_box_size(&mut reader)?;
                 let read_moov = MoovBox::read_box(&mut reader, box_size)?;
                 log::info!("moov @ 0x{start_pos:08x}: {read_moov:#?}");
-
                 self.moov = Some(read_moov);
             }
             _ => {
-                let box_size = actual_box_size(&mut reader)?;
                 log::info!("{name} @ 0x{start_pos:08x}: {box_size} bytes");
                 return Err(Error::UnsupportedBox(name));
             }
@@ -353,27 +328,24 @@ impl From<Error> for io::Error {
 }
 
 fn skip_box(reader: &mut buffer::Reader<'_>, header_box_size: u64) -> Result<ControlFlow<SanitizerState>, Error> {
-    match header_box_size {
-        0 => match reader.seek(io::SeekFrom::End(0)) {
-            Ok(_) => Ok(Continue(())),
-            Err(err) if matches!(err.kind(), io::ErrorKind::UnexpectedEof) => Ok(Break(SanitizerState::NeedsSkipToEnd)),
-            Err(err) => Err(err.into()),
-        },
+    let box_end_pos = match header_box_size {
+        0 => reader.get_ref().input_len(),
         box_size => {
+            let input_pos = reader.stream_position()?;
             let box_data_size = box_size
                 .checked_sub(HEADER_SIZE)
                 .ok_or(Error::InvalidInput("box size too small"))?;
-            let next_box_pos = reader
-                .stream_position()?
+            input_pos
                 .checked_add(box_data_size)
-                .ok_or(Error::InvalidInput("input length overflow"))?;
-            match reader.seek(io::SeekFrom::Start(next_box_pos)) {
-                Ok(_) => Ok(Continue(())),
-                Err(err) if matches!(err.kind(), io::ErrorKind::UnexpectedEof) => Ok(Break(SanitizerState::NeedsSkip(
-                    next_box_pos.checked_sub(reader.get_ref().end_input_pos()).ok_or(err)?,
-                ))),
-                Err(err) => Err(err.into()),
-            }
+                .ok_or(Error::InvalidInput("input length overflow"))?
+        }
+    };
+    let need_skip_amount = box_end_pos.checked_sub(reader.get_ref().end_input_pos());
+    match need_skip_amount.and_then(NonZeroU64::new) {
+        Some(need_skip_amount) => Ok(Break(SanitizerState::NeedsSkip(need_skip_amount))),
+        None => {
+            reader.seek(io::SeekFrom::Start(box_end_pos))?;
+            Ok(Continue(()))
         }
     }
 }
@@ -414,6 +386,10 @@ mod test {
         } else {
             HEADER_SIZE + 8
         }
+    }
+
+    fn needs_skip(amount: u64) -> SanitizerState {
+        SanitizerState::NeedsSkip(amount.try_into().unwrap())
     }
 
     struct TestMp4 {
@@ -463,7 +439,7 @@ mod test {
         header.size = 0;
         header.write(&mut &mut data[moov_pos..]).unwrap();
 
-        let mut sanitizer = Sanitizer::new();
+        let mut sanitizer = Sanitizer::new(data.len() as u64);
         assert_eq!(
             sanitizer.process_data(&data[..data.len() - 1]).unwrap(),
             SanitizerState::NeedsData
@@ -483,7 +459,7 @@ mod test {
         init_logger();
 
         let TestMp4 { data, mdat, mdat_data_pos, .. } = TestMp4::with_mdat_data_len(b"abcdefg", None);
-        let mut sanitizer = Sanitizer::new();
+        let mut sanitizer = Sanitizer::new(data.len() as u64);
         assert_eq!(
             sanitizer.process_data(&data[..mdat.offset as usize]).unwrap(),
             SanitizerState::NeedsData
@@ -492,13 +468,10 @@ mod test {
             sanitizer
                 .process_data(&data[mdat.offset as usize..mdat_data_pos])
                 .unwrap(),
-            SanitizerState::NeedsSkipToEnd
+            needs_skip(mdat.len - HEADER_SIZE)
         );
-        assert_eq!(
-            sanitizer.skip_data(mdat.len - HEADER_SIZE - 1).unwrap(),
-            SanitizerState::NeedsSkipToEnd
-        );
-        assert_eq!(sanitizer.skip_data(1).unwrap(), SanitizerState::NeedsSkipToEnd);
+        assert_eq!(sanitizer.skip_data(mdat.len - HEADER_SIZE - 1).unwrap(), needs_skip(1));
+        assert_eq!(sanitizer.skip_data(1).unwrap(), SanitizerState::NeedsData);
 
         let sanitized = sanitizer.finish().unwrap();
         assert_eq!(sanitized.data, mdat);
@@ -510,18 +483,18 @@ mod test {
         init_logger();
 
         let TestMp4 { data, mdat, mdat_data_pos, .. } = TestMp4::new(b"abcdefg");
-        let mut sanitizer = Sanitizer::new();
+        let mut sanitizer = Sanitizer::new(data.len() as u64);
         assert_eq!(
             sanitizer.process_data(&data[..mdat_data_pos]).unwrap(),
-            SanitizerState::NeedsSkip(mdat.len - HEADER_SIZE)
+            needs_skip(mdat.len - HEADER_SIZE)
         );
         assert_eq!(
             sanitizer.process_data(&data[mdat_data_pos..mdat_data_pos + 1]).unwrap(),
-            SanitizerState::NeedsSkip(mdat.len - HEADER_SIZE - 1)
+            needs_skip(mdat.len - HEADER_SIZE - 1)
         );
         assert_eq!(
             sanitizer.skip_data(mdat.len - HEADER_SIZE - 1 - 3).unwrap(),
-            SanitizerState::NeedsSkip(3)
+            needs_skip(3)
         );
         assert_eq!(sanitizer.skip_data(3).unwrap(), SanitizerState::NeedsData);
 
@@ -540,15 +513,12 @@ mod test {
         let mdat_data_pos = (mdat.offset + HEADER_SIZE) as usize;
         MoovBox::default().write_box(&mut data).unwrap();
 
-        let mut sanitizer = Sanitizer::new();
+        let mut sanitizer = Sanitizer::new(data.len() as u64);
         assert_eq!(
             sanitizer.process_data(&data[..mdat_data_pos]).unwrap(),
-            SanitizerState::NeedsSkip(mdat.len - HEADER_SIZE)
+            needs_skip(mdat.len - HEADER_SIZE)
         );
-        assert_eq!(
-            sanitizer.skip_data(mdat.len - HEADER_SIZE - 1).unwrap(),
-            SanitizerState::NeedsSkip(1)
-        );
+        assert_eq!(sanitizer.skip_data(mdat.len - HEADER_SIZE - 1).unwrap(), needs_skip(1));
         sanitizer
             .process_data(&data[(mdat.offset + mdat.len - 1) as usize..])
             .unwrap_err();
@@ -559,10 +529,10 @@ mod test {
         init_logger();
 
         let TestMp4 { data, mdat_data, mdat_data_pos, .. } = TestMp4::new(b"abcdefg");
-        let mut sanitizer = Sanitizer::new();
+        let mut sanitizer = Sanitizer::new(data.len() as u64);
         assert_eq!(
             sanitizer.process_data(&data[..mdat_data_pos]).unwrap(),
-            SanitizerState::NeedsSkip(mdat_data.len() as u64)
+            needs_skip(mdat_data.len() as u64)
         );
         sanitizer.skip_data(mdat_data.len() as u64 + 1).unwrap_err();
     }
@@ -571,7 +541,7 @@ mod test {
     fn erroneous_skip() {
         init_logger();
 
-        let mut sanitizer = Sanitizer::new();
+        let mut sanitizer = Sanitizer::new(100);
         sanitizer.skip_data(1).unwrap_err();
     }
 
@@ -586,16 +556,12 @@ mod test {
         let mut mdat = write_mdat_header(&mut data, Some(mdat_data_len));
         mdat.len += mdat_data_len;
 
-        let mut sanitizer = Sanitizer::new();
-        assert_eq!(
-            sanitizer.process_data(&data).unwrap(),
-            SanitizerState::NeedsSkip(mdat_data_len)
-        );
+        let mut sanitizer = Sanitizer::new(data.len() as u64 + mdat_data_len);
+        assert_eq!(sanitizer.process_data(&data).unwrap(), needs_skip(mdat_data_len));
         assert_eq!(sanitizer.skip_data(mdat_data_len).unwrap(), SanitizerState::NeedsData);
         let sanitized = sanitizer.finish().unwrap();
         assert_eq!(sanitized.data, mdat);
         assert_eq!(sanitized.data.offset + sanitized.data.len, u64::MAX);
-        assert_eq!(sanitize(io::Cursor::new(&data)).unwrap(), sanitized);
     }
 
     #[test]
@@ -603,11 +569,14 @@ mod test {
         init_logger();
 
         let TestMp4 { data, .. } = TestMp4::with_mdat_data_len(b"abcdefg", None);
-        let mut sanitizer = Sanitizer::new();
-        assert_eq!(sanitizer.process_data(&data).unwrap(), SanitizerState::NeedsSkipToEnd);
+        let mut sanitizer = Sanitizer::new(u64::MAX);
+        assert_eq!(
+            sanitizer.process_data(&data).unwrap(),
+            needs_skip(u64::MAX - data.len() as u64)
+        );
         assert_eq!(
             sanitizer.skip_data(u64::MAX - data.len() as u64).unwrap(),
-            SanitizerState::NeedsSkipToEnd
+            SanitizerState::NeedsData
         );
         sanitizer.skip_data(1).unwrap_err();
     }
@@ -622,7 +591,7 @@ mod test {
         let mdat = BoxHeader { name: BoxType::MdatBox, size: u64::MAX - data.len() as u64 + 1 };
         mdat.write(&mut data).unwrap();
 
-        let mut sanitizer = Sanitizer::new();
+        let mut sanitizer = Sanitizer::new(data.len() as u64);
         sanitizer.process_data(&data).unwrap_err();
     }
 
@@ -637,7 +606,7 @@ mod test {
             .write(&mut data)
             .unwrap();
 
-        let mut sanitizer = Sanitizer::new();
+        let mut sanitizer = Sanitizer::new(data.len() as u64);
         sanitizer.process_data(&data).unwrap_err();
     }
 
@@ -646,11 +615,14 @@ mod test {
         init_logger();
 
         let TestMp4 { data, .. } = TestMp4::with_mdat_data_len(b"abcdefg", None);
-        let mut sanitizer = Sanitizer::new();
-        assert_eq!(sanitizer.process_data(&data).unwrap(), SanitizerState::NeedsSkipToEnd);
+        let mut sanitizer = Sanitizer::new(u64::MAX);
+        assert_eq!(
+            sanitizer.process_data(&data).unwrap(),
+            needs_skip(u64::MAX - data.len() as u64)
+        );
         assert_eq!(
             sanitizer.skip_data(u64::MAX - data.len() as u64).unwrap(),
-            SanitizerState::NeedsSkipToEnd
+            SanitizerState::NeedsData
         );
         sanitizer.skip_data(1).unwrap_err();
     }
