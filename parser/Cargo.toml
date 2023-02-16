@@ -1,0 +1,7 @@
+[package]
+name = "mp4san_isomparse"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+mp4san_isomparse_macros = { path = "proc_macros" }
