@@ -1,6 +1,10 @@
+mod util;
+
 use std::io::{self, BufRead, BufReader, Read, Seek};
 
 use mp4::{skip_box, BoxHeader, BoxType, FourCC, FtypBox, MoovBox, ReadBox, WriteBox, HEADER_SIZE};
+
+use crate::util::checked_add_signed;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -130,23 +134,25 @@ pub fn sanitize<R: Read + Seek>(input: R) -> Result<SanitizedMetadata, Error> {
         Some(0) => (),
         Some(size @ HEADER_SIZE..=u64::MAX) => pad_size = size,
         mdat_backward_displacement => {
-            let mdat_forward_displacement = metadata_len.checked_sub(data.offset);
+            let mdat_displacement = match mdat_backward_displacement {
+                Some(mdat_backward_displacement) => {
+                    mdat_backward_displacement.try_into().ok().and_then(i32::checked_neg)
+                }
+                None => metadata_len.checked_sub(data.offset).unwrap().try_into().ok(),
+            };
+            let mdat_displacement: i32 =
+                mdat_displacement.ok_or(Error::UnsupportedBoxLayout("mdat displaced too far"))?;
+
             for trak in &mut moov.traks {
                 if let Some(stco) = &mut trak.mdia.minf.stbl.stco {
                     for entry in &mut stco.entries {
-                        if let Some(mdat_backward_displacement) = mdat_backward_displacement {
-                            *entry -= mdat_backward_displacement as u32;
-                        } else if let Some(mdat_forward_displacement) = mdat_forward_displacement {
-                            *entry += mdat_forward_displacement as u32;
-                        }
+                        *entry = checked_add_signed(*entry, mdat_displacement)
+                            .ok_or(mp4::Error::InvalidData("chunk offset not within mdat"))?;
                     }
                 } else if let Some(co64) = &mut trak.mdia.minf.stbl.co64 {
                     for entry in &mut co64.entries {
-                        if let Some(mdat_backward_displacement) = mdat_backward_displacement {
-                            *entry -= mdat_backward_displacement;
-                        } else if let Some(mdat_forward_displacement) = mdat_forward_displacement {
-                            *entry += mdat_forward_displacement;
-                        }
+                        *entry = checked_add_signed(*entry, mdat_displacement.into())
+                            .ok_or(mp4::Error::InvalidData("chunk offset not within mdat"))?;
                     }
                 }
             }
