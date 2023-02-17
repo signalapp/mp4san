@@ -22,11 +22,13 @@ pub enum Error {
     UnsupportedFormat(FourCC),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SanitizedMetadata {
     pub metadata: Vec<u8>,
     pub data: InputSpan,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct InputSpan {
     pub offset: u64,
     pub len: u64,
@@ -174,20 +176,68 @@ pub fn sanitize<R: Read + Seek>(input: R) -> Result<SanitizedMetadata, Error> {
 mod test {
     use mp4::WriteBox;
 
+    use crate::util::test::init_logger;
+
     use super::*;
 
     fn test_ftyp() -> FtypBox {
         FtypBox { major_brand: COMPATIBLE_BRAND, minor_version: 0, compatible_brands: vec![COMPATIBLE_BRAND] }
     }
 
+    fn write_test_mdat(out: &mut Vec<u8>, data: &[u8]) -> InputSpan {
+        let mut span = write_mdat_header(out, Some(data.len() as u64));
+        out.extend_from_slice(data);
+        span.len += data.len() as u64;
+        span
+    }
+
+    fn write_mdat_header(out: &mut Vec<u8>, data_len: Option<u64>) -> InputSpan {
+        let offset = out.len() as u64;
+        let size = match data_len {
+            Some(data_len) if data_len <= u32::MAX as u64 - HEADER_SIZE => data_len + HEADER_SIZE,
+            Some(data_len) => data_len + HEADER_SIZE + 8,
+            None => 0,
+        };
+        BoxHeader { name: BoxType::MdatBox, size }.write(out).unwrap();
+        InputSpan { offset, len: out.len() as u64 - offset }
+    }
+
+    struct TestMp4 {
+        data: Vec<u8>,
+        mdat: InputSpan,
+    }
+
+    impl TestMp4 {
+        fn new(mdat_data: &[u8]) -> Self {
+            let mut data = vec![];
+            test_ftyp().write_box(&mut data).unwrap();
+            MoovBox::default().write_box(&mut data).unwrap();
+            let mdat = write_test_mdat(&mut data, mdat_data);
+            Self { data, mdat }
+        }
+
+        fn with_mdat_data_len(mdat_data: &[u8], mdat_data_len: Option<u64>) -> Self {
+            let mut data = vec![];
+            test_ftyp().write_box(&mut data).unwrap();
+            MoovBox::default().write_box(&mut data).unwrap();
+            let mut mdat = write_mdat_header(&mut data, mdat_data_len);
+            data.extend_from_slice(&mdat_data);
+            if let Some(mdat_data_len) = mdat_data_len {
+                mdat.len = mdat.len.saturating_add(mdat_data_len);
+            } else {
+                mdat.len += mdat_data.len() as u64;
+            }
+            Self { data, mdat }
+        }
+    }
+
     #[test]
-    fn zero_size_box() {
+    fn zero_size_moov() {
+        init_logger();
+
         let mut data = vec![];
-
         test_ftyp().write_box(&mut data).unwrap();
-
-        BoxHeader { name: BoxType::MdatBox, size: 9 }.write(&mut data).unwrap();
-        data.push(b'A');
+        let mdat = write_test_mdat(&mut data, b"abcdefg");
 
         let moov_pos = data.len();
         MoovBox::default().write_box(&mut data).unwrap();
@@ -195,6 +245,43 @@ mod test {
         header.size = 0;
         header.write(&mut &mut data[moov_pos..]).unwrap();
 
-        sanitize(io::Cursor::new(data)).unwrap();
+        let sanitized = sanitize(io::Cursor::new(&data)).unwrap();
+        assert_eq!(sanitized.data, mdat);
+    }
+
+    #[test]
+    fn zero_size_mdat() {
+        init_logger();
+
+        let TestMp4 { data, mdat, .. } = TestMp4::with_mdat_data_len(b"abcdefg", None);
+
+        let sanitized = sanitize(io::Cursor::new(&data)).unwrap();
+        assert_eq!(sanitized.data, mdat);
+    }
+
+    #[test]
+    fn skip() {
+        init_logger();
+
+        let TestMp4 { data, mdat, .. } = TestMp4::new(b"abcdefg");
+
+        let sanitized = sanitize(io::Cursor::new(&data)).unwrap();
+        assert_eq!(sanitized.data, mdat);
+    }
+
+    #[test]
+    fn max_input_length() {
+        init_logger();
+
+        let mut data = vec![];
+        test_ftyp().write_box(&mut data).unwrap();
+        MoovBox::default().write_box(&mut data).unwrap();
+        let mdat_data_len = u64::MAX - data.len() as u64 - (HEADER_SIZE + 8);
+        let mut mdat = write_mdat_header(&mut data, Some(mdat_data_len));
+        mdat.len += mdat_data_len;
+
+        let sanitized = sanitize(io::Cursor::new(&data)).unwrap();
+        assert_eq!(sanitized.data, mdat);
+        assert_eq!(sanitized.data.offset + sanitized.data.len, u64::MAX);
     }
 }

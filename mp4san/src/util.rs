@@ -33,3 +33,15 @@ impl_checked_add_signed!(u32, i32);
 impl_checked_add_signed!(u64, i64);
 impl_checked_add_signed!(u128, i128);
 impl_checked_add_signed!(usize, isize);
+
+#[cfg(test)]
+pub mod test {
+    pub fn init_logger() {
+        // Ignore errors initializing the logger if tests race to configure it
+        let _ignore = env_logger::builder()
+            .filter_level(log::LevelFilter::Info)
+            .parse_default_env()
+            .is_test(true)
+            .try_init();
+    }
+}
