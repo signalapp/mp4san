@@ -18,8 +18,10 @@ pub fn derive_mp4_box(input: TokenStream) -> TokenStream {
     let expanded = quote! {
         #[automatically_derived]
         impl #impl_generics mp4san_isomparse::Mp4Box for #ident #ty_generics #where_clause {
-            fn size(&self) -> std::primitive::u64 {
-                std::convert::TryFrom::try_from(#size).unwrap()
+            fn size(&self) -> mp4san_isomparse::BoxSize {
+                mp4san_isomparse::BoxSize::new(
+                    std::convert::TryFrom::try_from(#size).unwrap(),
+                ).unwrap()
             }
 
             fn type_(&self) -> mp4san_isomparse::BoxType {

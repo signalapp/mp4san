@@ -6,10 +6,10 @@ pub use uuid::Uuid;
 
 /// An object (box, atom) in the mp4 file structure.
 ///
-/// A box is defined by its [type identifier](BoxType) and its [size](Mp4Box::size).
+/// A box is defined by its [type identifier](BoxType) and its [size](BoxSize).
 pub trait Mp4Box {
     /// Returns the size (length) of the box.
-    fn size(&self) -> u64;
+    fn size(&self) -> BoxSize;
 
     /// Returns the type identifier of the box.
     ///
@@ -43,10 +43,85 @@ impl BoxType {
 
     /// Returns `true` if the type is an extended/private type.
     ///
-    /// This is the opposite of [`is_compact`].
+    /// This is the opposite of [`is_compact`](Self::is_compact).
     pub fn is_extended(self) -> bool {
         matches!(self, BoxType::Extended(_))
     }
+}
+
+/// The size of an mp4 box (including the size and type fields).
+///
+/// Not all of the possible box sizes are valid. In particular, because boxes always start with
+/// a u32 (compact) size and a u32 (compact) type field, sizes less than `8` are not valid.
+/// Constructing a `BoxSize` checks that the size is at least `8`, or else `0` (meaning that the box
+/// extends until the end of the file).
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct BoxSize(u64);
+
+impl BoxSize {
+    /// Creates a `BoxSize` from a size value (as found in serialized box headers).
+    ///
+    /// See [the type level documentation](Self) for more.
+    pub fn new(serialized_size: u64) -> Result<Self, BoxSizeError> {
+        match serialized_size {
+            0 | 8.. => Ok(Self(serialized_size)),
+            1 => Err(BoxSizeError::Extended),
+            2..=7 => Err(BoxSizeError::Impossible),
+        }
+    }
+
+    /// Returns the explicit size represented by `self`.
+    ///
+    /// Returns `Some` if `self` is an explicit size, or `None` if it indicates that the relevant
+    /// box extends until the end of the file.
+    pub fn to_explicit_size(self) -> Option<u64> {
+        if self.is_explicit() {
+            Some(self.0)
+        } else {
+            None
+        }
+    }
+
+    /// Returns `true` if the size is explicit.
+    pub fn is_explicit(self) -> bool {
+        !self.is_until_eof()
+    }
+
+    /// Returns `true` if the size is _extends until end-of-file_.
+    ///
+    /// This is the opposite of [`is_explicit`](Self::is_explicit).
+    pub fn is_until_eof(self) -> bool {
+        self.0 == 0
+    }
+
+    /// Returns `true` if the size is compact **and explicit.**
+    ///
+    /// This is not quite the opposite of [`is_extended`](Self::is_extended): both will return
+    /// `false` for non-explicit sizes.
+    pub fn is_compact(self) -> bool {
+        self.is_explicit() && u32::try_from(self.0).is_ok()
+    }
+
+    /// Returns `true` if the size is extended **and explicit.**
+    ///
+    /// This is not quite the opposite of [`is_compact`](Self::is_compact): both will return `false`
+    /// for non-explicit sizes.
+    pub fn is_extended(self) -> bool {
+        self.is_explicit() && !self.is_compact()
+    }
+}
+
+/// The error type for interpreting serialized box sizes.
+#[derive(Debug)]
+pub enum BoxSizeError {
+    /// Returned by `BoxSize` constructors if the size value is in `2..8` (these are impossible).
+    Impossible,
+
+    /// Returned by `BoxSize` constructors if the size value is `1`.
+    ///
+    /// This indicates that the box's size is given in the extended “largesize” field, and so that
+    /// field should be read.
+    Extended,
 }
 
 #[derive(Mp4Box)]
@@ -95,31 +170,31 @@ mod tests {
             bar_ax: u64::MAX,
             foo_by: u32::MAX,
         };
-        assert_eq!(not_a_real.size(), 4 + 4 + 8 + 4);
+        assert_eq!(not_a_real.size().to_explicit_size(), Some(4 + 4 + 8 + 4));
     }
 
     #[test]
     fn test_size_enum_a() {
         let fake_enum = FakeEnumBox::A { foo: u32::MAX };
-        assert_eq!(fake_enum.size(), 4 + 4 + 4);
+        assert_eq!(fake_enum.size().to_explicit_size(), Some(4 + 4 + 4));
     }
 
     #[test]
     fn test_size_enum_b() {
         let fake_enum = FakeEnumBox::B(u64::MAX);
-        assert_eq!(fake_enum.size(), 4 + 4 + 8);
+        assert_eq!(fake_enum.size().to_explicit_size(), Some(4 + 4 + 8));
     }
 
     #[test]
     fn test_size_enum_c() {
         let fake_enum = FakeEnumBox::C;
-        assert_eq!(fake_enum.size(), 4 + 4);
+        assert_eq!(fake_enum.size().to_explicit_size(), Some(4 + 4));
     }
 
     #[test]
     fn test_size_exttype() {
         let fake_box = FakeUuidTypeBox;
-        assert_eq!(fake_box.size(), 4 + 4 + 16);
+        assert_eq!(fake_box.size().to_explicit_size(), Some(4 + 4 + 16));
     }
 
     #[test]
