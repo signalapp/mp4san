@@ -1,10 +1,17 @@
+mod parse;
 mod util;
 
 use std::io::{self, BufRead, BufReader, Read, Seek};
 
-use mp4::{skip_box, BoxHeader, BoxType, FourCC, FtypBox, MoovBox, ReadBox, WriteBox, HEADER_SIZE};
+use bytes::{Buf, BufMut, BytesMut};
+use mp4::{BoxType, FourCC, FtypBox, MoovBox, ReadBox, WriteBox};
 
+use crate::parse::BoxHeader;
 use crate::util::checked_add_signed;
+
+//
+// public types
+//
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -34,50 +41,79 @@ pub struct InputSpan {
     pub len: u64,
 }
 
+/// A subset of the [`Seek`] trait, providing a cursor which can skip forward within a stream of bytes.
+///
+/// [`Skip`] is automatically implemented for all types implementing [`Seek`].
+pub trait Skip {
+    /// Skip an amount of bytes in a stream.
+    ///
+    /// A skip beyond the end of a stream is allowed, but behavior is defined by the implementation.
+    fn skip(&mut self, amount: u64) -> io::Result<()>;
+
+    /// Returns the current position of the cursor from the start of the stream.
+    fn stream_position(&mut self) -> io::Result<u64>;
+
+    /// Returns the length of this stream, in bytes.
+    fn stream_len(&mut self) -> io::Result<u64>;
+}
+
 pub const COMPATIBLE_BRAND: FourCC = FourCC { value: *b"isom" };
 
-pub fn sanitize<R: Read + Seek>(input: R) -> Result<SanitizedMetadata, Error> {
-    let mut reader = BufReader::new(input);
+//
+// private types
+//
 
-    let mut ftyp = None;
-    let mut moov = None;
+/// [`Skip`] extension trait for [`BufReader`].
+///
+/// The blanket implementation of [`Skip`] for types implementing [`Seek`] means that [`Skip`] can't be implemented for
+/// [`BufReader<T>`] when `T` is only [`Skip`] and not [`Seek`]. This trait fixes that.
+trait BufReaderSkipExt {
+    /// Skip an amount of bytes in a stream.
+    ///
+    /// A skip beyond the end of a stream is allowed, but behavior is defined by the implementation.
+    fn skip(&mut self, amount: u64) -> io::Result<()>;
+
+    /// Returns the current position of the cursor from the start of the stream.
+    fn stream_position(&mut self) -> io::Result<u64>;
+
+    /// Returns the length of this stream, in bytes.
+    fn stream_len(&mut self) -> io::Result<u64>;
+}
+
+const MAX_READ_BOX_SIZE: u64 = 200 * 1024 * 1024;
+
+//
+// public functions
+//
+
+pub fn sanitize<R: Read + Skip>(input: R) -> Result<SanitizedMetadata, Error> {
+    let mut reader = BufReader::with_capacity(BoxHeader::MAX_SIZE as usize, input);
+
+    let mut ftyp: Option<FtypBox> = None;
+    let mut moov: Option<MoovBox> = None;
     let mut data: Option<InputSpan> = None;
 
     while !reader.fill_buf()?.is_empty() {
         let start_pos = reader.stream_position()?;
 
-        // NB: Only pass `size` to other `mp4` functions and don't rely on it to be meaningful; BoxHeader actually
-        // subtracts HEADER_SIZE from size in the 64-bit box size case as a hack.
-        let BoxHeader { name, size: mut box_size } = BoxHeader::read(&mut reader)?;
-        if box_size == 0 {
-            let input_pos = reader.get_mut().stream_position()?;
+        let header = BoxHeader::read(&mut reader)?;
 
-            // This is the unstable Seek::stream_len()
-            let input_len = reader.get_mut().seek(io::SeekFrom::End(0))?;
-            if input_pos != input_len {
-                reader.get_mut().seek(io::SeekFrom::Start(input_pos))?;
-            }
-
-            box_size = input_len - start_pos;
-            log::info!("last box size: {box_size}");
-        }
-
-        match name {
+        match header.box_type() {
             BoxType::FreeBox => {
-                skip_box(&mut reader, box_size)?;
+                let box_size = skip_box(&mut reader, &header)? + header.encoded_len();
                 log::info!("free @ 0x{start_pos:08x}: {box_size} bytes");
 
                 // Try to extend any already accumulated data in case there's more mdat boxes to come.
                 if let Some(data) = &mut data {
                     if data.offset + data.len == start_pos {
-                        data.len += reader.stream_position()? - start_pos;
+                        data.len += box_size;
                     }
                 }
             }
 
             BoxType::FtypBox if ftyp.is_some() => return Err(Error::InvalidBoxLayout("multiple ftyp boxes")),
             BoxType::FtypBox => {
-                let read_ftyp = FtypBox::read_box(&mut reader, box_size)?;
+                let read_ftyp = read_box(&mut reader, &header)?;
                 log::info!("ftyp @ 0x{start_pos:08x}: {read_ftyp:#?}");
                 ftyp = Some(read_ftyp);
             }
@@ -89,7 +125,7 @@ pub fn sanitize<R: Read + Seek>(input: R) -> Result<SanitizedMetadata, Error> {
             _ if ftyp.is_none() => return Err(Error::InvalidBoxLayout("ftyp is not the first significant box")),
 
             BoxType::MdatBox => {
-                skip_box(&mut reader, box_size)?;
+                let box_size = skip_box(&mut reader, &header)? + header.encoded_len();
                 log::info!("mdat @ 0x{start_pos:08x}: {box_size} bytes");
 
                 if let Some(data) = &mut data {
@@ -97,18 +133,18 @@ pub fn sanitize<R: Read + Seek>(input: R) -> Result<SanitizedMetadata, Error> {
                     if data.offset + data.len != start_pos {
                         return Err(Error::UnsupportedBoxLayout("discontiguous mdat boxes"));
                     }
-                    data.len += reader.stream_position()? - start_pos;
+                    data.len += box_size;
                 } else {
-                    data = Some(InputSpan { offset: start_pos, len: reader.stream_position()? - start_pos });
+                    data = Some(InputSpan { offset: start_pos, len: box_size });
                 }
             }
             BoxType::MoovBox => {
-                let read_moov = MoovBox::read_box(&mut reader, box_size)?;
+                let read_moov = read_box(&mut reader, &header)?;
                 log::info!("moov @ 0x{start_pos:08x}: {read_moov:#?}");
-
                 moov = Some(read_moov);
             }
-            _ => {
+            name => {
+                let box_size = skip_box(&mut reader, &header)? + header.encoded_len();
                 log::info!("{name} @ 0x{start_pos:08x}: {box_size} bytes");
                 return Err(Error::UnsupportedBox(name));
             }
@@ -132,9 +168,11 @@ pub fn sanitize<R: Read + Seek>(input: R) -> Result<SanitizedMetadata, Error> {
     // would move forward, adjust mdat offsets in stco/co64 the amount it was displaced.
     let metadata_len = ftyp.get_size() + moov.get_size();
     let mut pad_size = 0;
+    const PAD_HEADER_SIZE: u64 = BoxHeader::with_u32_data_size(BoxType::FreeBox, 0).encoded_len();
+    const MAX_PAD_SIZE: u64 = u32::MAX as u64 - PAD_HEADER_SIZE;
     match data.offset.checked_sub(metadata_len) {
         Some(0) => (),
-        Some(size @ HEADER_SIZE..=u64::MAX) => pad_size = size,
+        Some(size @ PAD_HEADER_SIZE..=MAX_PAD_SIZE) => pad_size = size,
         mdat_backward_displacement => {
             let mdat_displacement = match mdat_backward_displacement {
                 Some(mdat_backward_displacement) => {
@@ -165,15 +203,126 @@ pub fn sanitize<R: Read + Seek>(input: R) -> Result<SanitizedMetadata, Error> {
     ftyp.write_box(&mut metadata)?;
     moov.write_box(&mut metadata)?;
     if pad_size != 0 {
-        BoxHeader { name: BoxType::FreeBox, size: pad_size }.write(&mut metadata)?;
+        let pad_header = BoxHeader::with_u32_data_size(BoxType::FreeBox, (pad_size - PAD_HEADER_SIZE) as u32);
+        pad_header.write(&mut metadata);
         metadata.resize((metadata_len + pad_size) as usize, 0);
     }
 
     Ok(SanitizedMetadata { metadata, data })
 }
 
+//
+// Skip impls
+//
+
+impl<T: Seek> Skip for T {
+    fn skip(&mut self, amount: u64) -> io::Result<()> {
+        match amount.try_into() {
+            Ok(0) => (),
+            Ok(amount) => {
+                self.seek(io::SeekFrom::Current(amount))?;
+            }
+            Err(_) => {
+                let stream_pos = self.stream_position()?;
+                let seek_pos = stream_pos
+                    .checked_add(amount)
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "seek past u64::MAX"))?;
+                self.seek(io::SeekFrom::Start(seek_pos))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn stream_position(&mut self) -> io::Result<u64> {
+        io::Seek::stream_position(self)
+    }
+
+    fn stream_len(&mut self) -> io::Result<u64> {
+        // This is the unstable Seek::stream_len
+        let stream_pos = self.stream_position()?;
+        let len = self.seek(io::SeekFrom::End(0))?;
+
+        if stream_pos != len {
+            self.seek(io::SeekFrom::Start(stream_pos))?;
+        }
+
+        Ok(len)
+    }
+}
+
+//
+// private functions
+//
+
+/// Read and parse a box's data assuming its header has already been read.
+fn read_box<R, T>(reader: &mut BufReader<R>, header: &BoxHeader) -> Result<T, Error>
+where
+    R: Read + Skip,
+    T: for<'a> ReadBox<&'a mut io::Cursor<BytesMut>>,
+{
+    let box_data_size = match header.box_data_size()? {
+        Some(box_data_size) => box_data_size,
+        None => reader.stream_len()? - reader.stream_position()?,
+    };
+
+    if box_data_size > MAX_READ_BOX_SIZE {
+        return Err(mp4::Error::InvalidData("box too large").into());
+    }
+
+    let mut buf = BytesMut::with_capacity((header.encoded_len() + box_data_size) as usize);
+    header.write(&mut buf);
+    buf.put_bytes(0, box_data_size as usize);
+    reader.read_exact(&mut buf[header.encoded_len() as usize..])?;
+
+    let mut cursor = io::Cursor::new(buf);
+    cursor.advance(header.encoded_len() as usize);
+
+    // `read_box` actually expects `box_data_size + HEADER_SIZE` as a hack to handle extended box headers.
+    let mp4box = T::read_box(&mut cursor, box_data_size + mp4::HEADER_SIZE)?;
+    Ok(mp4box)
+}
+
+/// Skip a box's data assuming its header has already been read.
+///
+/// Returns the amount of data that was skipped.
+fn skip_box<R: Read + Skip>(reader: &mut BufReader<R>, header: &BoxHeader) -> Result<u64, Error> {
+    let box_data_size = match header.box_data_size()? {
+        Some(box_size) => box_size,
+        None => reader.stream_len()? - reader.stream_position()?,
+    };
+    reader.skip(box_data_size)?;
+    Ok(box_data_size)
+}
+
+//
+// BufReaderSkipExt impls
+//
+
+impl<T: Read + Skip> BufReaderSkipExt for BufReader<T> {
+    fn skip(&mut self, amount: u64) -> io::Result<()> {
+        let buf_len = self.buffer().len();
+        if let Some(skip_amount) = amount.checked_sub(buf_len as u64) {
+            if skip_amount != 0 {
+                self.get_mut().skip(skip_amount)?;
+            }
+        }
+        self.consume(buf_len.min(amount as usize));
+        Ok(())
+    }
+
+    fn stream_position(&mut self) -> io::Result<u64> {
+        let stream_pos = self.get_mut().stream_position()?;
+        Ok(stream_pos.saturating_sub(self.buffer().len() as u64))
+    }
+
+    fn stream_len(&mut self) -> io::Result<u64> {
+        self.get_mut().stream_len()
+    }
+}
+
 #[cfg(test)]
 mod test {
+    use bytes::Bytes;
     use mp4::WriteBox;
 
     use crate::util::test::init_logger;
@@ -193,18 +342,19 @@ mod test {
 
     fn write_mdat_header(out: &mut Vec<u8>, data_len: Option<u64>) -> InputSpan {
         let offset = out.len() as u64;
-        let size = match data_len {
-            Some(data_len) if data_len <= u32::MAX as u64 - HEADER_SIZE => data_len + HEADER_SIZE,
-            Some(data_len) => data_len + HEADER_SIZE + 8,
-            None => 0,
+        let header = match data_len {
+            Some(data_len) => BoxHeader::with_data_size(BoxType::MdatBox, data_len).unwrap(),
+            None => BoxHeader::until_eof(BoxType::MdatBox),
         };
-        BoxHeader { name: BoxType::MdatBox, size }.write(out).unwrap();
+        header.write(&mut *out);
         InputSpan { offset, len: out.len() as u64 - offset }
     }
 
     struct TestMp4 {
-        data: Vec<u8>,
+        data: Bytes,
+        data_len: u64,
         mdat: InputSpan,
+        mdat_skipped: u64,
     }
 
     impl TestMp4 {
@@ -213,7 +363,7 @@ mod test {
             test_ftyp().write_box(&mut data).unwrap();
             MoovBox::default().write_box(&mut data).unwrap();
             let mdat = write_test_mdat(&mut data, mdat_data);
-            Self { data, mdat }
+            Self { data_len: data.len() as u64, data: data.into(), mdat, mdat_skipped: 0 }
         }
 
         fn with_mdat_data_len(mdat_data: &[u8], mdat_data_len: Option<u64>) -> Self {
@@ -227,7 +377,42 @@ mod test {
             } else {
                 mdat.len += mdat_data.len() as u64;
             }
-            Self { data, mdat }
+            Self { data_len: data.len() as u64, data: data.into(), mdat, mdat_skipped: 0 }
+        }
+    }
+
+    impl Read for TestMp4 {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            (&mut self.data).reader().read(buf)
+        }
+    }
+
+    impl Skip for TestMp4 {
+        fn skip(&mut self, amount: u64) -> io::Result<()> {
+            let advance_amount = self.data.len().min(amount as usize);
+            self.data.advance(advance_amount);
+
+            let skip_amount = amount.saturating_sub(advance_amount as u64);
+            let mdat_end = self.mdat.offset.saturating_add(self.mdat.len);
+            let mdat_skip_max = mdat_end.saturating_sub(self.data_len);
+            match self.mdat_skipped.checked_add(skip_amount) {
+                Some(mdat_skipped) if mdat_skipped <= mdat_skip_max => {
+                    self.mdat_skipped = mdat_skipped;
+                    Ok(())
+                }
+                _ => Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "test skipped past u64 limit",
+                )),
+            }
+        }
+
+        fn stream_position(&mut self) -> io::Result<u64> {
+            Ok(self.data_len - self.data.len() as u64 + self.mdat_skipped)
+        }
+
+        fn stream_len(&mut self) -> io::Result<u64> {
+            Ok(self.data_len.max(self.mdat.offset + self.mdat.len))
         }
     }
 
@@ -241,9 +426,7 @@ mod test {
 
         let moov_pos = data.len();
         MoovBox::default().write_box(&mut data).unwrap();
-        let mut header = BoxHeader::read(&mut &data[moov_pos..]).unwrap();
-        header.size = 0;
-        header.write(&mut &mut data[moov_pos..]).unwrap();
+        BoxHeader::until_eof(BoxType::MoovBox).write(&mut &mut data[moov_pos..]);
 
         let sanitized = sanitize(io::Cursor::new(&data)).unwrap();
         assert_eq!(sanitized.data, mdat);
@@ -253,9 +436,8 @@ mod test {
     fn zero_size_mdat() {
         init_logger();
 
-        let TestMp4 { data, mdat, .. } = TestMp4::with_mdat_data_len(b"abcdefg", None);
-
-        let sanitized = sanitize(io::Cursor::new(&data)).unwrap();
+        let test @ TestMp4 { mdat, .. } = TestMp4::with_mdat_data_len(b"abcdefg", None);
+        let sanitized = sanitize(test).unwrap();
         assert_eq!(sanitized.data, mdat);
     }
 
@@ -263,9 +445,8 @@ mod test {
     fn skip() {
         init_logger();
 
-        let TestMp4 { data, mdat, .. } = TestMp4::new(b"abcdefg");
-
-        let sanitized = sanitize(io::Cursor::new(&data)).unwrap();
+        let test @ TestMp4 { mdat, .. } = TestMp4::new(b"abcdefg");
+        let sanitized = sanitize(test).unwrap();
         assert_eq!(sanitized.data, mdat);
     }
 
@@ -273,15 +454,27 @@ mod test {
     fn max_input_length() {
         init_logger();
 
-        let mut data = vec![];
-        test_ftyp().write_box(&mut data).unwrap();
-        MoovBox::default().write_box(&mut data).unwrap();
-        let mdat_data_len = u64::MAX - data.len() as u64 - (HEADER_SIZE + 8);
-        let mut mdat = write_mdat_header(&mut data, Some(mdat_data_len));
-        mdat.len += mdat_data_len;
-
-        let sanitized = sanitize(io::Cursor::new(&data)).unwrap();
+        let test = TestMp4::with_mdat_data_len(b"", Some(u64::MAX - 16));
+        let test @ TestMp4 { mdat, .. } = TestMp4::with_mdat_data_len(b"", Some(u64::MAX - test.data.len() as u64));
+        let sanitized = sanitize(test).unwrap();
         assert_eq!(sanitized.data, mdat);
         assert_eq!(sanitized.data.offset + sanitized.data.len, u64::MAX);
+    }
+
+    #[test]
+    fn input_length_overflow() {
+        init_logger();
+
+        let test = TestMp4::with_mdat_data_len(b"", Some(u64::MAX - 16));
+        let test = TestMp4::with_mdat_data_len(b"", Some(u64::MAX - test.data.len() as u64 + 1));
+        sanitize(test).unwrap_err();
+    }
+
+    #[test]
+    fn box_size_overflow() {
+        init_logger();
+
+        let test = TestMp4::with_mdat_data_len(b"", Some(u64::MAX - 16));
+        sanitize(test).unwrap_err();
     }
 }
