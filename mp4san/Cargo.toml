@@ -15,8 +15,11 @@ exclude = ["/.github", ".*"]
 
 [dependencies]
 bytes = "1.3.0"
+derive-where = "1.1.0"
+derive_more = "0.99.17"
+downcast-rs = "1.2.0"
+dyn-clonable = "0.9.0"
 log = "0.4.17"
-mp4 = "0.12.0"
 thiserror = "1.0.38"
 
 [dev-dependencies]

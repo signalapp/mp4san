@@ -1,11 +1,12 @@
-use std::io::{self, Read};
+use std::fmt;
+use std::io;
+use std::io::Read;
 use std::mem::size_of;
 
-use bytes::BufMut;
-use mp4::FourCC;
+use bytes::{Buf, BufMut};
+use derive_more::{Display, From};
 
-#[cfg(test)]
-use crate::Error;
+use super::{FourCC, ParseError};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BoxHeader {
@@ -20,19 +21,20 @@ pub enum BoxSize {
     Ext(u64),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum BoxType {
-    FourCC(mp4::BoxType),
-    Uuid([u8; 16]),
+#[derive(Clone, Copy, Debug, Display, From, PartialEq, Eq)]
+pub enum BoxType {
+    FourCC(FourCC),
+    Uuid(BoxUuid),
 }
 
-const UUID: FourCC = FourCC { value: *b"uuid" };
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct BoxUuid(pub [u8; 16]);
 
 impl BoxHeader {
     pub const MAX_SIZE: u64 = 32;
 
-    pub const fn with_u32_data_size(box_type: mp4::BoxType, data_size: u32) -> Self {
-        let box_type = BoxType::FourCC(box_type);
+    pub const fn with_u32_data_size(box_type: BoxType, data_size: u32) -> Self {
         let header_len = Self { box_type, box_size: BoxSize::Size(0) }.encoded_len() as u32;
         if let Some(box_size) = data_size.checked_add(header_len) {
             return Self { box_type, box_size: BoxSize::Size(box_size) };
@@ -42,32 +44,35 @@ impl BoxHeader {
         Self { box_type, box_size: BoxSize::Ext(data_size as u64 + header_len) }
     }
 
-    #[cfg(test)]
-    pub const fn with_data_size(box_type: mp4::BoxType, data_size: u64) -> Result<Self, Error> {
+    pub const fn with_data_size(box_type: BoxType, data_size: u64) -> Result<Self, ParseError> {
         if data_size <= u32::MAX as u64 {
             return Ok(Self::with_u32_data_size(box_type, data_size as u32));
         }
 
-        let box_type = BoxType::FourCC(box_type);
         let header_len = Self { box_type, box_size: BoxSize::Ext(0) }.encoded_len();
         let Some(box_size) = data_size.checked_add(header_len) else {
-            return Err(Error::Parse(mp4::Error::InvalidData("box size too large")));
+            return Err(ParseError::InvalidInput("box size too large"));
         };
         Ok(Self { box_type, box_size: BoxSize::Ext(box_size) })
     }
 
     #[cfg(test)]
-    pub const fn until_eof(box_type: mp4::BoxType) -> Self {
-        Self { box_type: BoxType::FourCC(box_type), box_size: BoxSize::UntilEof }
+    pub const fn until_eof(box_type: BoxType) -> Self {
+        Self { box_type, box_size: BoxSize::UntilEof }
+    }
+
+    pub fn parse<B: Buf>(input: B) -> Result<Self, ParseError> {
+        Self::read(input.reader()).map_err(|err| {
+            assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
+            ParseError::TruncatedBox
+        })
     }
 
     pub fn read<R: Read>(mut input: R) -> Result<Self, io::Error> {
         let mut size = [0; 4];
         input.read_exact(&mut size)?;
 
-        let mut name = [0; 4];
-        input.read_exact(&mut name)?;
-        let name: mp4::BoxType = u32::from_be_bytes(name).into();
+        let name = FourCC::read(&mut input)?;
 
         let size = match u32::from_be_bytes(size) {
             0 => BoxSize::UntilEof,
@@ -79,47 +84,48 @@ impl BoxHeader {
             size => BoxSize::Size(size),
         };
 
-        let name = match FourCC::from(name) {
-            UUID => {
+        let name = match name {
+            FourCC::UUID => {
                 let mut uuid = [0; 16];
                 input.read_exact(&mut uuid)?;
-                BoxType::Uuid(uuid)
+                BoxType::Uuid(BoxUuid(uuid))
             }
-            _ => BoxType::FourCC(name),
+            fourcc => fourcc.into(),
         };
 
         Ok(Self { box_type: name, box_size: size })
     }
 
     pub const fn encoded_len(&self) -> u64 {
-        let mut size = (size_of::<u32>() + size_of::<u32>()) as u64;
+        let mut size = FourCC::size() + size_of::<u32>() as u64;
         if let BoxSize::Ext(_) = self.box_size {
             size += size_of::<u64>() as u64;
         }
         if let BoxType::Uuid(_) = self.box_type {
-            size += 16;
+            size += size_of::<BoxUuid>() as u64;
         }
         size
     }
 
-    pub fn box_data_size(&self) -> Result<Option<u64>, mp4::Error> {
+    pub fn box_size(&self) -> Option<u64> {
+        self.box_size.size()
+    }
+
+    pub fn box_data_size(&self) -> Result<Option<u64>, ParseError> {
         match self.box_size.size() {
             None => Ok(None),
             Some(size) => size
                 .checked_sub(self.encoded_len())
-                .ok_or(mp4::Error::InvalidData("Invalid box size: too small"))
+                .ok_or(ParseError::InvalidInput("Invalid box size: too small"))
                 .map(Some),
         }
     }
 
-    pub const fn box_type(&self) -> mp4::BoxType {
-        match self.box_type {
-            BoxType::FourCC(fourcc) => fourcc,
-            BoxType::Uuid(_) => mp4::BoxType::UnknownBox(u32::from_be_bytes(UUID.value)),
-        }
+    pub const fn box_type(&self) -> BoxType {
+        self.box_type
     }
 
-    pub fn write<B: BufMut>(&self, mut out: B) {
+    pub fn put_buf<B: BufMut>(&self, mut out: B) {
         match self.box_size {
             BoxSize::UntilEof => out.put_u32(0),
             BoxSize::Ext(_) => out.put_u32(1),
@@ -127,16 +133,16 @@ impl BoxHeader {
         }
 
         match self.box_type {
-            BoxType::FourCC(fourcc) => out.put_u32(fourcc.into()),
-            BoxType::Uuid(_) => out.put_u32(UUID.into()),
-        };
+            BoxType::FourCC(fourcc) => fourcc.put_buf(&mut out),
+            BoxType::Uuid(_) => FourCC::UUID.put_buf(&mut out),
+        }
 
         if let BoxSize::Ext(size) = self.box_size {
             out.put_u64(size);
         }
 
         if let BoxType::Uuid(uuid) = self.box_type {
-            out.put(&uuid[..]);
+            out.put(&uuid.0[..]);
         }
     }
 }
@@ -149,4 +155,51 @@ impl BoxSize {
             BoxSize::Ext(size) => Some(size),
         }
     }
+}
+
+macro_rules! box_type {
+    ($($name:ident),+ $(,)?) => {
+        impl FourCC {
+            $(pub const $name: Self = box_name_to_fourcc(stringify!($name));)+
+        }
+
+        impl BoxType {
+            $(pub const $name: Self = Self::FourCC(FourCC::$name);)+
+        }
+    };
+}
+
+box_type! {
+    CO64,
+    FREE,
+    FTYP,
+    MDAT,
+    MDIA,
+    MINF,
+    MOOV,
+    STBL,
+    STCO,
+    TRAK,
+    UUID,
+}
+
+impl fmt::Display for BoxUuid {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self([a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p]) = *self;
+        write!(
+            fmt,
+            "{a:02x}{b:02x}{c:02x}{d:02x}-{e:02x}{f:02x}-{g:02x}{h:02x}-{i:02x}{j:02x}-{k:02x}{l:02x}{m:02x}{n:02x}{o:02x}{p:02x}",
+        )
+    }
+}
+
+const fn box_name_to_fourcc(name: &str) -> FourCC {
+    let name = name.as_bytes();
+    let mut fourcc = [b' '; 4];
+    let mut name_idx = 0;
+    while name_idx < name.len() {
+        fourcc[name_idx] = name[name_idx].to_ascii_lowercase();
+        name_idx += 1;
+    }
+    FourCC { value: fourcc }
 }

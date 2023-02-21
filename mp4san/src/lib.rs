@@ -1,12 +1,12 @@
-mod parse;
+pub mod parse;
 mod util;
 
 use std::io::{self, BufRead, BufReader, Read, Seek};
 
-use bytes::{Buf, BufMut, BytesMut};
-use mp4::{BoxType, FourCC, FtypBox, MoovBox, ReadBox, WriteBox};
+use bytes::BytesMut;
+use util::IoResultExt;
 
-use crate::parse::BoxHeader;
+use crate::parse::{BoxData, BoxHeader, BoxType, FourCC, FtypBox, MoovBox, Mp4Box, ParseBox, ParseError, StblCoMut};
 use crate::util::checked_add_signed;
 
 //
@@ -15,18 +15,10 @@ use crate::util::checked_add_signed;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("Invalid box layout: {0}")]
-    InvalidBoxLayout(&'static str),
     #[error("IO error: {0}")]
     Io(#[from] io::Error),
     #[error("Parse error: {0}")]
-    Parse(#[from] mp4::Error),
-    #[error("Unsupported box: {0}")]
-    UnsupportedBox(BoxType),
-    #[error("Unsupported box layout: {0}")]
-    UnsupportedBoxLayout(&'static str),
-    #[error("Unsupported format: {0}")]
-    UnsupportedFormat(FourCC),
+    Parse(#[from] ParseError),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -89,17 +81,17 @@ const MAX_READ_BOX_SIZE: u64 = 200 * 1024 * 1024;
 pub fn sanitize<R: Read + Skip>(input: R) -> Result<SanitizedMetadata, Error> {
     let mut reader = BufReader::with_capacity(BoxHeader::MAX_SIZE as usize, input);
 
-    let mut ftyp: Option<FtypBox> = None;
-    let mut moov: Option<MoovBox> = None;
+    let mut ftyp: Option<Mp4Box<FtypBox>> = None;
+    let mut moov: Option<Mp4Box<MoovBox>> = None;
     let mut data: Option<InputSpan> = None;
 
     while !reader.fill_buf()?.is_empty() {
         let start_pos = reader.stream_position()?;
 
-        let header = BoxHeader::read(&mut reader)?;
+        let header = BoxHeader::read(&mut reader).map_eof(|_| Error::Parse(ParseError::TruncatedBox))?;
 
         match header.box_type() {
-            BoxType::FreeBox => {
+            BoxType::FREE => {
                 let box_size = skip_box(&mut reader, &header)? + header.encoded_len();
                 log::info!("free @ 0x{start_pos:08x}: {box_size} bytes");
 
@@ -111,10 +103,11 @@ pub fn sanitize<R: Read + Skip>(input: R) -> Result<SanitizedMetadata, Error> {
                 }
             }
 
-            BoxType::FtypBox if ftyp.is_some() => return Err(Error::InvalidBoxLayout("multiple ftyp boxes")),
-            BoxType::FtypBox => {
-                let read_ftyp = read_box(&mut reader, &header)?;
-                log::info!("ftyp @ 0x{start_pos:08x}: {read_ftyp:#?}");
+            BoxType::FTYP if ftyp.is_some() => return Err(ParseError::InvalidBoxLayout("multiple ftyp boxes").into()),
+            BoxType::FTYP => {
+                let mut read_ftyp = read_box(&mut reader, header)?;
+                let ftyp_data = read_ftyp.data.parse()?;
+                log::info!("ftyp @ 0x{start_pos:08x}: {ftyp_data:#?}");
                 ftyp = Some(read_ftyp);
             }
 
@@ -122,53 +115,57 @@ pub fn sanitize<R: Read + Skip>(input: R) -> Result<SanitizedMetadata, Error> {
             // contains a single compatible brand, "mp41", and notably not "isom" which is the ISO spec we follow for
             // parsing now. This implies that there's additional stuff in "mp41" which is not in "isom". "mp41" is also
             // very old at this point, so it'll require additional research/work to be able to parse/remux it.
-            _ if ftyp.is_none() => return Err(Error::InvalidBoxLayout("ftyp is not the first significant box")),
+            _ if ftyp.is_none() => {
+                return Err(ParseError::InvalidBoxLayout("ftyp is not the first significant box").into());
+            }
 
-            BoxType::MdatBox => {
+            BoxType::MDAT => {
                 let box_size = skip_box(&mut reader, &header)? + header.encoded_len();
                 log::info!("mdat @ 0x{start_pos:08x}: {box_size} bytes");
 
                 if let Some(data) = &mut data {
                     // Try to extend already accumulated data.
                     if data.offset + data.len != start_pos {
-                        return Err(Error::UnsupportedBoxLayout("discontiguous mdat boxes"));
+                        return Err(ParseError::UnsupportedBoxLayout("discontiguous mdat boxes").into());
                     }
                     data.len += box_size;
                 } else {
                     data = Some(InputSpan { offset: start_pos, len: box_size });
                 }
             }
-            BoxType::MoovBox => {
-                let read_moov = read_box(&mut reader, &header)?;
-                log::info!("moov @ 0x{start_pos:08x}: {read_moov:#?}");
+            BoxType::MOOV => {
+                let mut read_moov = read_box(&mut reader, header)?;
+                let moov_data = read_moov.data.parse()?;
+                log::info!("moov @ 0x{start_pos:08x}: {moov_data:#?}");
                 moov = Some(read_moov);
             }
             name => {
                 let box_size = skip_box(&mut reader, &header)? + header.encoded_len();
                 log::info!("{name} @ 0x{start_pos:08x}: {box_size} bytes");
-                return Err(Error::UnsupportedBox(name));
+                return Err(ParseError::UnsupportedBox(name).into());
             }
         }
     }
 
-    let Some(ftyp) = ftyp else {
-        return Err(Error::Parse(mp4::Error::BoxNotFound(BoxType::FtypBox)));
+    let Some(mut ftyp) = ftyp else {
+        return Err(ParseError::MissingRequiredBox(BoxType::FTYP).into());
     };
-    if !ftyp.compatible_brands.contains(&COMPATIBLE_BRAND) {
-        return Err(Error::UnsupportedFormat(ftyp.major_brand));
+    let ftyp_data = ftyp.data.parse()?;
+    if !ftyp_data.compatible_brands().any(|b| b == COMPATIBLE_BRAND) {
+        return Err(ParseError::UnsupportedFormat(ftyp_data.major_brand).into());
     };
     let Some(mut moov) = moov else {
-        return Err(Error::Parse(mp4::Error::BoxNotFound(BoxType::MoovBox)));
+        return Err(ParseError::MissingRequiredBox(BoxType::MOOV).into());
     };
     let Some(data) = data else {
-        return Err(Error::Parse(mp4::Error::BoxNotFound(BoxType::MdatBox)));
+        return Err(ParseError::MissingRequiredBox(BoxType::MDAT).into());
     };
 
     // Add a free box to pad, if one will fit, if the mdat box would move backward. If one won't fit, or if the mdat box
     // would move forward, adjust mdat offsets in stco/co64 the amount it was displaced.
-    let metadata_len = ftyp.get_size() + moov.get_size();
+    let metadata_len = ftyp.encoded_len() + moov.encoded_len();
     let mut pad_size = 0;
-    const PAD_HEADER_SIZE: u64 = BoxHeader::with_u32_data_size(BoxType::FreeBox, 0).encoded_len();
+    const PAD_HEADER_SIZE: u64 = BoxHeader::with_u32_data_size(BoxType::FREE, 0).encoded_len();
     const MAX_PAD_SIZE: u64 = u32::MAX as u64 - PAD_HEADER_SIZE;
     match data.offset.checked_sub(metadata_len) {
         Some(0) => (),
@@ -181,18 +178,23 @@ pub fn sanitize<R: Read + Skip>(input: R) -> Result<SanitizedMetadata, Error> {
                 None => metadata_len.checked_sub(data.offset).unwrap().try_into().ok(),
             };
             let mdat_displacement: i32 =
-                mdat_displacement.ok_or(Error::UnsupportedBoxLayout("mdat displaced too far"))?;
+                mdat_displacement.ok_or(ParseError::UnsupportedBoxLayout("mdat displaced too far"))?;
 
-            for trak in &mut moov.traks {
-                if let Some(stco) = &mut trak.mdia.minf.stbl.stco {
-                    for entry in &mut stco.entries {
-                        *entry = checked_add_signed(*entry, mdat_displacement)
-                            .ok_or(mp4::Error::InvalidData("chunk offset not within mdat"))?;
+            for trak in &mut moov.data.parse()?.traks() {
+                let co = trak?.mdia_mut()?.minf_mut()?.stbl_mut()?.co_mut()?;
+                if let StblCoMut::Stco(stco) = co {
+                    for mut entry in &mut stco.entries_mut() {
+                        entry.set(
+                            checked_add_signed(entry.get(), mdat_displacement)
+                                .ok_or(ParseError::InvalidInput("chunk offset not within mdat"))?,
+                        );
                     }
-                } else if let Some(co64) = &mut trak.mdia.minf.stbl.co64 {
-                    for entry in &mut co64.entries {
-                        *entry = checked_add_signed(*entry, mdat_displacement.into())
-                            .ok_or(mp4::Error::InvalidData("chunk offset not within mdat"))?;
+                } else if let StblCoMut::Co64(co64) = co {
+                    for mut entry in &mut co64.entries_mut() {
+                        entry.set(
+                            checked_add_signed(entry.get(), mdat_displacement.into())
+                                .ok_or(ParseError::InvalidInput("chunk offset not within mdat"))?,
+                        );
                     }
                 }
             }
@@ -200,11 +202,11 @@ pub fn sanitize<R: Read + Skip>(input: R) -> Result<SanitizedMetadata, Error> {
     }
 
     let mut metadata = Vec::with_capacity((metadata_len + pad_size) as usize);
-    ftyp.write_box(&mut metadata)?;
-    moov.write_box(&mut metadata)?;
+    ftyp.put_buf(&mut metadata);
+    moov.put_buf(&mut metadata);
     if pad_size != 0 {
-        let pad_header = BoxHeader::with_u32_data_size(BoxType::FreeBox, (pad_size - PAD_HEADER_SIZE) as u32);
-        pad_header.write(&mut metadata);
+        let pad_header = BoxHeader::with_u32_data_size(BoxType::FREE, (pad_size - PAD_HEADER_SIZE) as u32);
+        pad_header.put_buf(&mut metadata);
         metadata.resize((metadata_len + pad_size) as usize, 0);
     }
 
@@ -255,10 +257,10 @@ impl<T: Seek> Skip for T {
 //
 
 /// Read and parse a box's data assuming its header has already been read.
-fn read_box<R, T>(reader: &mut BufReader<R>, header: &BoxHeader) -> Result<T, Error>
+fn read_box<R, T>(reader: &mut BufReader<R>, header: BoxHeader) -> Result<Mp4Box<T>, Error>
 where
     R: Read + Skip,
-    T: for<'a> ReadBox<&'a mut io::Cursor<BytesMut>>,
+    T: ParseBox,
 {
     let box_data_size = match header.box_data_size()? {
         Some(box_data_size) => box_data_size,
@@ -266,20 +268,15 @@ where
     };
 
     if box_data_size > MAX_READ_BOX_SIZE {
-        return Err(mp4::Error::InvalidData("box too large").into());
+        return Err(ParseError::InvalidInput("box too large").into());
     }
 
-    let mut buf = BytesMut::with_capacity((header.encoded_len() + box_data_size) as usize);
-    header.write(&mut buf);
-    buf.put_bytes(0, box_data_size as usize);
-    reader.read_exact(&mut buf[header.encoded_len() as usize..])?;
+    let mut buf = BytesMut::zeroed(box_data_size as usize);
+    reader
+        .read_exact(&mut buf)
+        .map_eof(|_| Error::Parse(ParseError::TruncatedBox))?;
 
-    let mut cursor = io::Cursor::new(buf);
-    cursor.advance(header.encoded_len() as usize);
-
-    // `read_box` actually expects `box_data_size + HEADER_SIZE` as a hack to handle extended box headers.
-    let mp4box = T::read_box(&mut cursor, box_data_size + mp4::HEADER_SIZE)?;
-    Ok(mp4box)
+    Ok(Mp4Box { header, data: BoxData::Bytes(buf) })
 }
 
 /// Skip a box's data assuming its header has already been read.
@@ -290,7 +287,9 @@ fn skip_box<R: Read + Skip>(reader: &mut BufReader<R>, header: &BoxHeader) -> Re
         Some(box_size) => box_size,
         None => reader.stream_len()? - reader.stream_position()?,
     };
-    reader.skip(box_data_size)?;
+    reader
+        .skip(box_data_size)
+        .map_eof(|_| Error::Parse(ParseError::TruncatedBox))?;
     Ok(box_data_size)
 }
 
@@ -322,15 +321,18 @@ impl<T: Read + Skip> BufReaderSkipExt for BufReader<T> {
 
 #[cfg(test)]
 mod test {
-    use bytes::Bytes;
-    use mp4::WriteBox;
+    use bytes::{Buf, Bytes};
 
     use crate::util::test::init_logger;
 
     use super::*;
 
-    fn test_ftyp() -> FtypBox {
-        FtypBox { major_brand: COMPATIBLE_BRAND, minor_version: 0, compatible_brands: vec![COMPATIBLE_BRAND] }
+    fn test_ftyp() -> Mp4Box<FtypBox> {
+        Mp4Box::with_data(FtypBox::new(COMPATIBLE_BRAND, 0, [COMPATIBLE_BRAND])).unwrap()
+    }
+
+    fn test_moov() -> Mp4Box<MoovBox> {
+        Mp4Box::with_data(MoovBox::default()).unwrap()
     }
 
     fn write_test_mdat(out: &mut Vec<u8>, data: &[u8]) -> InputSpan {
@@ -343,10 +345,10 @@ mod test {
     fn write_mdat_header(out: &mut Vec<u8>, data_len: Option<u64>) -> InputSpan {
         let offset = out.len() as u64;
         let header = match data_len {
-            Some(data_len) => BoxHeader::with_data_size(BoxType::MdatBox, data_len).unwrap(),
-            None => BoxHeader::until_eof(BoxType::MdatBox),
+            Some(data_len) => BoxHeader::with_data_size(BoxType::MDAT, data_len).unwrap(),
+            None => BoxHeader::until_eof(BoxType::MDAT),
         };
-        header.write(&mut *out);
+        header.put_buf(&mut *out);
         InputSpan { offset, len: out.len() as u64 - offset }
     }
 
@@ -360,16 +362,16 @@ mod test {
     impl TestMp4 {
         fn new(mdat_data: &[u8]) -> Self {
             let mut data = vec![];
-            test_ftyp().write_box(&mut data).unwrap();
-            MoovBox::default().write_box(&mut data).unwrap();
+            test_ftyp().put_buf(&mut data);
+            test_moov().put_buf(&mut data);
             let mdat = write_test_mdat(&mut data, mdat_data);
             Self { data_len: data.len() as u64, data: data.into(), mdat, mdat_skipped: 0 }
         }
 
         fn with_mdat_data_len(mdat_data: &[u8], mdat_data_len: Option<u64>) -> Self {
             let mut data = vec![];
-            test_ftyp().write_box(&mut data).unwrap();
-            MoovBox::default().write_box(&mut data).unwrap();
+            test_ftyp().put_buf(&mut data);
+            test_moov().put_buf(&mut data);
             let mut mdat = write_mdat_header(&mut data, mdat_data_len);
             data.extend_from_slice(&mdat_data);
             if let Some(mdat_data_len) = mdat_data_len {
@@ -421,12 +423,12 @@ mod test {
         init_logger();
 
         let mut data = vec![];
-        test_ftyp().write_box(&mut data).unwrap();
+        test_ftyp().put_buf(&mut data);
         let mdat = write_test_mdat(&mut data, b"abcdefg");
 
         let moov_pos = data.len();
-        MoovBox::default().write_box(&mut data).unwrap();
-        BoxHeader::until_eof(BoxType::MoovBox).write(&mut &mut data[moov_pos..]);
+        test_moov().put_buf(&mut data);
+        BoxHeader::until_eof(BoxType::MOOV).put_buf(&mut &mut data[moov_pos..]);
 
         let sanitized = sanitize(io::Cursor::new(&data)).unwrap();
         assert_eq!(sanitized.data, mdat);
