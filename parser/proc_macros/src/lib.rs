@@ -1,8 +1,8 @@
 use proc_macro::TokenStream;
 
-use proc_macro2::TokenStream as TokenStream2;
+use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{quote, quote_spanned};
-use syn::{parse_macro_input, Data, DeriveInput, Lit, Meta};
+use syn::{parse_macro_input, Data, DeriveInput, Ident, Index, Lit, Meta};
 use syn::spanned::Spanned;
 use uuid::Uuid;
 
@@ -12,10 +12,18 @@ pub fn derive_mp4_box(input: TokenStream) -> TokenStream {
     let ident = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
+    if matches!(input.data, Data::Enum(_) | Data::Union(_)) {
+        // This one _does_ need a semicolon though.
+        return TokenStream::from(quote! {
+            std::compile_error!("this trait can only be derived for structs");
+        });
+    }
     let box_type = extract_box_type(&input);
     let size = sum_box_size(&input);
+    let write_fn = derive_write_fn(&input);
+    let read_fn = derive_read_fn(&input);
 
-    let expanded = quote! {
+    TokenStream::from(quote! {
         #[automatically_derived]
         impl #impl_generics mp4san_isomparse::Mp4Box for #ident #ty_generics #where_clause {
             fn size(&self) -> mp4san_isomparse::BoxSize {
@@ -27,10 +35,90 @@ pub fn derive_mp4_box(input: TokenStream) -> TokenStream {
             fn type_(&self) -> mp4san_isomparse::BoxType {
                 #box_type
             }
+
+            #write_fn
+
+            #read_fn
+        }
+    })
+}
+
+fn derive_write_fn(input: &DeriveInput) -> TokenStream2 {
+    let write_header = quote! {
+        let (size, largesize) = self.size().to_serialized_size();
+        let (type_, usertype) = self.type_().to_serialized_type();
+        output.write_all(&size.to_be_bytes())?;
+        output.write_all(&type_.to_be_bytes())?;
+        if let Some(largesize) = largesize {
+            output.write_all(&largesize.to_be_bytes())?;
+        }
+        if let Some(usertype) = usertype {
+            output.write_all(&usertype)?;
         }
     };
+    let write_fields = match &input.data {
+        Data::Struct(struct_data) => {
+            let place_expr = struct_data.fields.iter().enumerate().map(|(index, field)| {
+                if let Some(ident) = &field.ident {
+                    quote_spanned! { field.span() => self.#ident }
+                } else {
+                    let tuple_index = Index::from(index);
+                    quote_spanned! { field.span() => self.#tuple_index }
+                }
+            });
+            quote! { #( output.write_all(&#place_expr.to_be_bytes())?; )* }
+        },
+        _ => unreachable!(),
+    };
+    quote! {
+        fn write_to<W: std::io::Write + ?std::marker::Sized>(
+            &self,
+            output: &mut W,
+        ) -> std::result::Result<(), mp4san_isomparse::Error> {
+            #write_header
+            #write_fields
+            std::result::Result::Ok(())
+        }
+    }
+}
 
-    TokenStream::from(expanded)
+fn derive_read_fn(input: &DeriveInput) -> TokenStream2 {
+    let ident = &input.ident;
+    match &input.data {
+        Data::Struct(struct_data) => {
+            let mut field_ty = Vec::new();
+            let mut field_ident = Vec::new();
+            let mut bind_ident = Vec::new();
+            for (index, field) in struct_data.fields.iter().enumerate() {
+                field_ty.push(field.ty.clone());
+                if let Some(ident) = &field.ident {
+                    field_ident.push(quote_spanned! { field.span() => #ident });
+                    bind_ident.push(ident.clone());
+                } else {
+                    let tuple_index = Index::from(index);
+                    field_ident.push(quote_spanned! { field.span() => #tuple_index });
+                    bind_ident.push(Ident::new(&format!("field_{index}"), Span::mixed_site()));
+                }
+            }
+            quote! {
+                fn read_from<R: std::io::Read + ?std::marker::Sized>(
+                    input: &mut R,
+                    size: std::primitive::u64,
+                ) -> std::result::Result<Self, mp4san_isomparse::Error>
+                where
+                    Self: std::marker::Sized,
+                {
+                    #(
+                        let mut buffer = [0; std::mem::size_of::<#field_ty>()];
+                        input.read_exact(&mut buffer)?;
+                        let #bind_ident = #field_ty::from_be_bytes(buffer);
+                    )*
+                    std::result::Result::Ok(#ident { #( #field_ident: #bind_ident ),* })
+                }
+            }
+        },
+        _ => unreachable!(),
+    }
 }
 
 fn extract_box_type(input: &DeriveInput) -> TokenStream2 {
@@ -107,23 +195,7 @@ fn sum_box_size(derive_input: &DeriveInput) -> TokenStream2 {
             });
             quote! { #(+ #sum_expr)* }
         },
-        Data::Enum(enum_data) => {
-            let enum_ident = &derive_input.ident;
-            let arms = enum_data.variants.iter().map(|variant| {
-                let ident = &variant.ident;
-                let sum_expr = variant.fields.iter().map(|field| {
-                    let ty = &field.ty;
-                    quote_spanned! { field.span() => std::mem::size_of::<#ty>() }
-                });
-                quote! {
-                    #enum_ident::#ident { .. } => { 0 #(+ #sum_expr)* },
-                }
-            });
-            quote! { + match self { #(#arms)* } }
-        },
-        Data::Union(_) => return quote! {
-            std::compile_error!("this trait cannot be derived for unions")
-        },
+        _ => unreachable!(),
     };
     quote! {
         // size
