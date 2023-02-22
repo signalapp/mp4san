@@ -1,5 +1,7 @@
 use bytes::{BufMut, BytesMut};
+use error_stack::Result;
 
+use super::error::{ParseResultExt, WhileParsingChild};
 use super::mp4box::{Boxes, ParseBox};
 use super::{BoxType, Co64Box, ParseError, ParsedBox, StcoBox};
 
@@ -22,20 +24,29 @@ impl StblBox {
     pub fn co_mut(&mut self) -> Result<StblCoMut<'_>, ParseError> {
         let have_stco = self.children.box_types().any(|box_type| box_type == STCO);
         let have_co64 = self.children.box_types().any(|box_type| box_type == CO64);
-        if have_stco && have_co64 {
-            return Err(ParseError::InvalidBoxLayout("more than one stco and co64 present"));
-        }
+        ensure_attach!(
+            !(have_stco && have_co64),
+            ParseError::InvalidBoxLayout,
+            "more than one stco and co64 present",
+            WhileParsingChild(NAME, STCO),
+        );
         if have_stco {
-            self.children.get_one_mut().map(StblCoMut::Stco)
+            self.children
+                .get_one_mut()
+                .while_parsing_child(NAME, STCO)
+                .map(StblCoMut::Stco)
         } else {
-            self.children.get_one_mut().map(StblCoMut::Co64)
+            self.children
+                .get_one_mut()
+                .while_parsing_child(NAME, CO64)
+                .map(StblCoMut::Co64)
         }
     }
 }
 
 impl ParseBox for StblBox {
     fn parse(buf: &mut BytesMut) -> Result<Self, ParseError> {
-        let children = Boxes::parse(buf)?;
+        let children = Boxes::parse(buf).while_parsing_field(NAME, "children")?;
         Ok(Self { children })
     }
 

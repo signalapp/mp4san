@@ -1,7 +1,9 @@
 use std::mem::size_of;
 
 use bytes::Buf;
+use error_stack::Result;
 
+use super::error::WhileParsingType;
 use super::ParseError;
 
 pub trait Mpeg4Int: Sized {
@@ -19,7 +21,8 @@ macro_rules! mpeg4_int {
         $(impl Mpeg4Int for $ty {
             fn parse<B: Buf>(mut buf: B) -> Result<Self, ParseError> {
                 if buf.remaining() < size_of::<Self>() {
-                    return Err(ParseError::TruncatedBox);
+                    use crate::parse::error::WhileParsingType;
+                    bail_attach!(ParseError::TruncatedBox, WhileParsingType(stringify!($ty)));
                 }
                 Ok(buf.$fun())
             }
@@ -40,9 +43,11 @@ mpeg4_int! {
 
 impl<T: Mpeg4Int, const N: usize> Mpeg4Int for [T; N] {
     fn parse<B: Buf>(mut buf: B) -> Result<Self, ParseError> {
-        if buf.remaining() < size_of::<Self>() {
-            return Err(ParseError::TruncatedBox);
-        }
+        ensure_attach!(
+            buf.remaining() >= size_of::<Self>(),
+            ParseError::TruncatedBox,
+            WhileParsingType::new::<Self>(),
+        );
         Ok([(); N].map(|()| T::parse(&mut buf).unwrap_or_else(|_| unreachable!())))
     }
 }

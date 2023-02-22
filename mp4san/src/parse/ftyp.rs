@@ -1,8 +1,11 @@
 use std::mem::size_of;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use error_stack::Result;
 
-use super::{mp4box::ParsedBox, BoxType, FourCC, Mpeg4IntReaderExt, ParseBox, ParseError};
+use super::error::{ParseResultExt, WhereEq, WhileParsingField};
+use super::mp4box::ParsedBox;
+use super::{BoxType, FourCC, Mpeg4IntReaderExt, ParseBox, ParseError};
 
 #[derive(Clone, Debug)]
 pub struct FtypBox {
@@ -27,12 +30,15 @@ impl FtypBox {
 
 impl ParseBox for FtypBox {
     fn parse(reader: &mut BytesMut) -> Result<Self, ParseError> {
-        let major_brand = reader.get()?;
-        let minor_version = reader.get()?;
+        let major_brand = reader.get().while_parsing_field(NAME, "major_brand")?;
+        let minor_version = reader.get().while_parsing_field(NAME, "minor_version")?;
 
-        if reader.remaining() % FourCC::size() as usize != 0 {
-            return Err(ParseError::TruncatedBox);
-        }
+        ensure_attach!(
+            reader.remaining() % FourCC::size() as usize == 0,
+            ParseError::TruncatedBox,
+            WhileParsingField(NAME, "compatible_brands"),
+            WhereEq("reader.remaining()", reader.remaining()),
+        );
 
         let compatible_brands = reader.copy_to_bytes(reader.remaining());
 

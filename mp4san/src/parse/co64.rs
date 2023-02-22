@@ -1,7 +1,9 @@
 use std::mem::{size_of, take};
 
 use bytes::{BufMut, BytesMut};
+use error_stack::Result;
 
+use super::error::WhileParsingField;
 use super::{BoxType, Mpeg4Int, ParseBox, ParseError, ParsedBox};
 
 #[derive(Clone, Debug)]
@@ -26,15 +28,24 @@ impl Co64Box {
 impl ParseBox for Co64Box {
     fn parse(mut buf: &mut BytesMut) -> Result<Self, ParseError> {
         let entry_count = u32::parse(&mut buf)?;
-        let entries_len = size_of::<u64>()
-            .checked_mul(entry_count as usize)
-            .ok_or(ParseError::InvalidInput("co64 entry count overflow"))?;
-        if entries_len < buf.len() {
-            return Err(ParseError::InvalidInput("extra unparsed co64 data"));
-        }
-        if entries_len > buf.len() {
-            return Err(ParseError::TruncatedBox);
-        }
+        let entries_len = size_of::<u64>().checked_mul(entry_count as usize).ok_or_else(|| {
+            report_attach!(
+                ParseError::InvalidInput,
+                "overflow",
+                WhileParsingField(NAME, "entry_count"),
+            )
+        })?;
+        ensure_attach!(
+            entries_len >= buf.len(),
+            ParseError::InvalidInput,
+            "extra unparsed data",
+            WhileParsingField(NAME, "entries"),
+        );
+        ensure_attach!(
+            entries_len <= buf.len(),
+            ParseError::TruncatedBox,
+            WhileParsingField(NAME, "entries"),
+        );
         let entries = take(buf);
         Ok(Self { entries })
     }

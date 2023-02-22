@@ -2,7 +2,9 @@ use std::convert::TryInto;
 use std::mem::{size_of, take};
 
 use bytes::{BufMut, BytesMut};
+use error_stack::Result;
 
+use super::error::WhileParsingField;
 use super::mp4box::ParseBox;
 use super::{BoxType, Mpeg4Int, ParseError, ParsedBox};
 
@@ -28,15 +30,24 @@ impl StcoBox {
 impl ParseBox for StcoBox {
     fn parse(mut buf: &mut BytesMut) -> Result<Self, ParseError> {
         let entry_count = u32::parse(&mut buf)?;
-        let entries_len = size_of::<u32>()
-            .checked_mul(entry_count as usize)
-            .ok_or(ParseError::InvalidInput("stco entry count overflow"))?;
-        if entries_len < buf.len() {
-            return Err(ParseError::InvalidInput("extra unparsed stco data"));
-        }
-        if entries_len > buf.len() {
-            return Err(ParseError::TruncatedBox);
-        }
+        let entries_len = size_of::<u32>().checked_mul(entry_count as usize).ok_or_else(|| {
+            report_attach!(
+                ParseError::InvalidInput,
+                "overflow",
+                WhileParsingField(NAME, "entry_count"),
+            )
+        })?;
+        ensure_attach!(
+            entries_len >= buf.len(),
+            ParseError::InvalidInput,
+            "extra unparsed data",
+            WhileParsingField(NAME, "entries"),
+        );
+        ensure_attach!(
+            entries_len <= buf.len(),
+            ParseError::TruncatedBox,
+            WhileParsingField(NAME, "entries"),
+        );
         let entries = take(buf);
         Ok(Self { entries })
     }

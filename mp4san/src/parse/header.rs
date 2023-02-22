@@ -5,7 +5,9 @@ use std::mem::size_of;
 
 use bytes::{Buf, BufMut};
 use derive_more::{Display, From};
+use error_stack::Result;
 
+use super::error::WhileParsingBox;
 use super::{FourCC, ParseError};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,14 +46,14 @@ impl BoxHeader {
         Self { box_type, box_size: BoxSize::Ext(data_size as u64 + header_len) }
     }
 
-    pub const fn with_data_size(box_type: BoxType, data_size: u64) -> Result<Self, ParseError> {
+    pub fn with_data_size(box_type: BoxType, data_size: u64) -> Result<Self, ParseError> {
         if data_size <= u32::MAX as u64 {
             return Ok(Self::with_u32_data_size(box_type, data_size as u32));
         }
 
         let header_len = Self { box_type, box_size: BoxSize::Ext(0) }.encoded_len();
         let Some(box_size) = data_size.checked_add(header_len) else {
-            return Err(ParseError::InvalidInput("box size too large"));
+            bail_attach!(ParseError::InvalidInput, "box size too large", WhileParsingBox(box_type));
         };
         Ok(Self { box_type, box_size: BoxSize::Ext(box_size) })
     }
@@ -64,11 +66,11 @@ impl BoxHeader {
     pub fn parse<B: Buf>(input: B) -> Result<Self, ParseError> {
         Self::read(input.reader()).map_err(|err| {
             assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
-            ParseError::TruncatedBox
+            report_attach!(ParseError::TruncatedBox, "while parsing box header")
         })
     }
 
-    pub fn read<R: Read>(mut input: R) -> Result<Self, io::Error> {
+    pub fn read<R: Read>(mut input: R) -> io::Result<Self> {
         let mut size = [0; 4];
         input.read_exact(&mut size)?;
 
@@ -116,7 +118,13 @@ impl BoxHeader {
             None => Ok(None),
             Some(size) => size
                 .checked_sub(self.encoded_len())
-                .ok_or(ParseError::InvalidInput("Invalid box size: too small"))
+                .ok_or_else(|| {
+                    report_attach!(
+                        ParseError::InvalidInput,
+                        "box size too small",
+                        WhileParsingBox(self.box_type)
+                    )
+                })
                 .map(Some),
         }
     }

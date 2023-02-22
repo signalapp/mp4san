@@ -5,7 +5,9 @@ use bytes::{Buf, BufMut, BytesMut};
 use derive_where::derive_where;
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clonable::clonable;
+use error_stack::Result;
 
+use super::error::{MultipleBoxes, ParseResultExt, WhileParsingBox};
 use super::{BoxHeader, BoxType, ParseError};
 
 #[derive(Debug)]
@@ -52,8 +54,8 @@ impl<T: ParsedBox + ?Sized> Mp4Box<T> {
     }
 
     pub fn parse(mut buf: &mut BytesMut) -> Result<Self, ParseError> {
-        let header = BoxHeader::parse(&mut buf)?;
-        let data = BoxData::get_from_bytes_mut(buf, &header)?;
+        let header = BoxHeader::parse(&mut buf).while_parsing_type::<Self>()?;
+        let data = BoxData::get_from_bytes_mut(buf, &header).while_parsing_type::<Self>()?;
         Ok(Self { header, data })
     }
 
@@ -79,9 +81,19 @@ impl<T: ParsedBox + ?Sized> BoxData<T> {
         match header.box_data_size()? {
             None => Ok(Self::Bytes(take(buf))),
             Some(box_data_size) => match box_data_size.try_into() {
-                Ok(box_data_size) if box_data_size > buf.len() => Err(ParseError::TruncatedBox),
-                Ok(box_data_size) => Ok(Self::Bytes(buf.split_to(box_data_size))),
-                Err(_) => Err(ParseError::InvalidInput("box too large")),
+                Ok(box_data_size) => {
+                    ensure_attach!(
+                        box_data_size <= buf.len(),
+                        ParseError::TruncatedBox,
+                        WhileParsingBox(header.box_type())
+                    );
+                    Ok(Self::Bytes(buf.split_to(box_data_size)))
+                }
+                Err(_) => Err(report_attach!(
+                    ParseError::InvalidInput,
+                    "box too large",
+                    WhileParsingBox(header.box_type())
+                )),
             },
         }
     }
@@ -91,10 +103,13 @@ impl<T: ParsedBox + ?Sized> BoxData<T> {
         T: ParseBox + Sized,
     {
         if let BoxData::Bytes(data) = self {
-            let parsed = T::parse(data)?;
-            if !data.is_empty() {
-                return Err(ParseError::InvalidInput("extra unparsed box data"));
-            }
+            let parsed = T::parse(data).while_parsing_type::<BoxData<T>>()?;
+            ensure_attach!(
+                data.is_empty(),
+                ParseError::InvalidInput,
+                "extra unparsed data",
+                WhileParsingBox(T::box_type()),
+            );
             *self = Self::Parsed(Box::new(parsed));
         }
         match self {
@@ -105,10 +120,13 @@ impl<T: ParsedBox + ?Sized> BoxData<T> {
 
     fn parse_as<U: ParseBox + ParsedBox + Into<Box<T>>>(&mut self) -> Result<Option<&mut U>, ParseError> {
         if let BoxData::Bytes(data) = self {
-            let parsed = U::parse(data)?;
-            if !data.is_empty() {
-                return Err(ParseError::InvalidInput("extra unparsed box data"));
-            }
+            let parsed = U::parse(data).while_parsing_type::<BoxData<U>>()?;
+            ensure_attach!(
+                data.is_empty(),
+                ParseError::InvalidInput,
+                "extra unparsed data",
+                WhileParsingBox(U::box_type()),
+            );
             *self = Self::Parsed(parsed.into());
         }
         match self {
@@ -152,7 +170,7 @@ impl Boxes {
     pub fn parse(buf: &mut BytesMut) -> Result<Self, ParseError> {
         let mut boxes = Vec::new();
         while buf.has_remaining() {
-            boxes.push(Mp4Box::parse(buf)?);
+            boxes.push(Mp4Box::parse(buf).while_parsing_type::<Self>()?);
         }
         Ok(Self { boxes })
     }
@@ -178,9 +196,11 @@ impl Boxes {
     }
 
     pub fn get_one_mut<T: ParseBox + ParsedBox>(&mut self) -> Result<&mut T, ParseError> {
-        if self.box_types().filter(|box_type| *box_type == T::box_type()).count() > 1 {
-            return Err(ParseError::InvalidBoxLayout("multiple boxes of same type"));
-        }
+        ensure_attach!(
+            self.box_types().filter(|box_type| *box_type == T::box_type()).count() <= 1,
+            ParseError::InvalidBoxLayout,
+            MultipleBoxes(T::box_type()),
+        );
         self.get_mut()
             .next()
             .ok_or_else(|| ParseError::MissingRequiredBox(T::box_type()))?

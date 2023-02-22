@@ -1,13 +1,21 @@
+#[macro_use]
+extern crate error_stack;
+
+#[macro_use]
+mod macros;
+
 pub mod parse;
 mod util;
 
 use std::io::{self, BufRead, BufReader, Read, Seek};
 
 use bytes::BytesMut;
-use util::IoResultExt;
+use derive_more::Display;
+use error_stack::Report;
 
+use crate::parse::error::{MultipleBoxes, WhileParsingBox};
 use crate::parse::{BoxData, BoxHeader, BoxType, FourCC, FtypBox, MoovBox, Mp4Box, ParseBox, ParseError, StblCoMut};
-use crate::util::checked_add_signed;
+use crate::util::{checked_add_signed, IoResultExt};
 
 //
 // public types
@@ -18,7 +26,7 @@ pub enum Error {
     #[error("IO error: {0}")]
     Io(#[from] io::Error),
     #[error("Parse error: {0}")]
-    Parse(#[from] ParseError),
+    Parse(Report<ParseError>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -72,6 +80,10 @@ trait BufReaderSkipExt {
     fn stream_len(&mut self) -> io::Result<u64>;
 }
 
+#[derive(Clone, Copy, Debug, Display)]
+#[display(fmt = "box data too large: {} > {}", _0, MAX_READ_BOX_SIZE)]
+struct BoxDataTooLarge(u64);
+
 const MAX_READ_BOX_SIZE: u64 = 200 * 1024 * 1024;
 
 //
@@ -88,7 +100,8 @@ pub fn sanitize<R: Read + Skip>(input: R) -> Result<SanitizedMetadata, Error> {
     while !reader.fill_buf()?.is_empty() {
         let start_pos = reader.stream_position()?;
 
-        let header = BoxHeader::read(&mut reader).map_eof(|_| Error::Parse(ParseError::TruncatedBox))?;
+        let header = BoxHeader::read(&mut reader)
+            .map_eof(|_| Error::Parse(report_attach!(ParseError::TruncatedBox, "while parsing box header")))?;
 
         match header.box_type() {
             BoxType::FREE => {
@@ -103,8 +116,12 @@ pub fn sanitize<R: Read + Skip>(input: R) -> Result<SanitizedMetadata, Error> {
                 }
             }
 
-            BoxType::FTYP if ftyp.is_some() => return Err(ParseError::InvalidBoxLayout("multiple ftyp boxes").into()),
             BoxType::FTYP => {
+                ensure_attach!(
+                    ftyp.is_none(),
+                    ParseError::InvalidBoxLayout,
+                    MultipleBoxes(BoxType::FTYP)
+                );
                 let mut read_ftyp = read_box(&mut reader, header)?;
                 let ftyp_data = read_ftyp.data.parse()?;
                 log::info!("ftyp @ 0x{start_pos:08x}: {ftyp_data:#?}");
@@ -116,7 +133,7 @@ pub fn sanitize<R: Read + Skip>(input: R) -> Result<SanitizedMetadata, Error> {
             // parsing now. This implies that there's additional stuff in "mp41" which is not in "isom". "mp41" is also
             // very old at this point, so it'll require additional research/work to be able to parse/remux it.
             _ if ftyp.is_none() => {
-                return Err(ParseError::InvalidBoxLayout("ftyp is not the first significant box").into());
+                bail_attach!(ParseError::InvalidBoxLayout, "ftyp is not the first significant box");
             }
 
             BoxType::MDAT => {
@@ -125,9 +142,11 @@ pub fn sanitize<R: Read + Skip>(input: R) -> Result<SanitizedMetadata, Error> {
 
                 if let Some(data) = &mut data {
                     // Try to extend already accumulated data.
-                    if data.offset + data.len != start_pos {
-                        return Err(ParseError::UnsupportedBoxLayout("discontiguous mdat boxes").into());
-                    }
+                    ensure_attach!(
+                        data.offset + data.len == start_pos,
+                        ParseError::UnsupportedBoxLayout,
+                        "discontiguous mdat boxes",
+                    );
                     data.len += box_size;
                 } else {
                     data = Some(InputSpan { offset: start_pos, len: box_size });
@@ -142,23 +161,23 @@ pub fn sanitize<R: Read + Skip>(input: R) -> Result<SanitizedMetadata, Error> {
             name => {
                 let box_size = skip_box(&mut reader, &header)? + header.encoded_len();
                 log::info!("{name} @ 0x{start_pos:08x}: {box_size} bytes");
-                return Err(ParseError::UnsupportedBox(name).into());
+                return Err(report!(ParseError::UnsupportedBox(name)).into());
             }
         }
     }
 
     let Some(mut ftyp) = ftyp else {
-        return Err(ParseError::MissingRequiredBox(BoxType::FTYP).into());
+        return Err(report!(ParseError::MissingRequiredBox(BoxType::FTYP)).into());
     };
     let ftyp_data = ftyp.data.parse()?;
     if !ftyp_data.compatible_brands().any(|b| b == COMPATIBLE_BRAND) {
-        return Err(ParseError::UnsupportedFormat(ftyp_data.major_brand).into());
+        return Err(report!(ParseError::UnsupportedFormat(ftyp_data.major_brand)).into());
     };
     let Some(mut moov) = moov else {
-        return Err(ParseError::MissingRequiredBox(BoxType::MOOV).into());
+        return Err(report!(ParseError::MissingRequiredBox(BoxType::MOOV)).into());
     };
     let Some(data) = data else {
-        return Err(ParseError::MissingRequiredBox(BoxType::MDAT).into());
+        return Err(report!(ParseError::MissingRequiredBox(BoxType::MDAT)).into());
     };
 
     // Add a free box to pad, if one will fit, if the mdat box would move backward. If one won't fit, or if the mdat box
@@ -177,23 +196,25 @@ pub fn sanitize<R: Read + Skip>(input: R) -> Result<SanitizedMetadata, Error> {
                 }
                 None => metadata_len.checked_sub(data.offset).unwrap().try_into().ok(),
             };
-            let mdat_displacement: i32 =
-                mdat_displacement.ok_or(ParseError::UnsupportedBoxLayout("mdat displaced too far"))?;
+            let mdat_displacement: i32 = mdat_displacement
+                .ok_or_else(|| report_attach!(ParseError::UnsupportedBoxLayout, "mdat displaced too far"))?;
 
             for trak in &mut moov.data.parse()?.traks() {
                 let co = trak?.mdia_mut()?.minf_mut()?.stbl_mut()?.co_mut()?;
                 if let StblCoMut::Stco(stco) = co {
                     for mut entry in &mut stco.entries_mut() {
                         entry.set(
-                            checked_add_signed(entry.get(), mdat_displacement)
-                                .ok_or(ParseError::InvalidInput("chunk offset not within mdat"))?,
+                            checked_add_signed(entry.get(), mdat_displacement).ok_or_else(|| {
+                                report_attach!(ParseError::InvalidInput, "chunk offset not within mdat")
+                            })?,
                         );
                     }
                 } else if let StblCoMut::Co64(co64) = co {
                     for mut entry in &mut co64.entries_mut() {
                         entry.set(
-                            checked_add_signed(entry.get(), mdat_displacement.into())
-                                .ok_or(ParseError::InvalidInput("chunk offset not within mdat"))?,
+                            checked_add_signed(entry.get(), mdat_displacement.into()).ok_or_else(|| {
+                                report_attach!(ParseError::InvalidInput, "chunk offset not within mdat")
+                            })?,
                         );
                     }
                 }
@@ -267,15 +288,20 @@ where
         None => reader.stream_len()? - reader.stream_position()?,
     };
 
-    if box_data_size > MAX_READ_BOX_SIZE {
-        return Err(ParseError::InvalidInput("box too large").into());
-    }
+    ensure_attach!(
+        box_data_size <= MAX_READ_BOX_SIZE,
+        ParseError::InvalidInput,
+        BoxDataTooLarge(box_data_size),
+        WhileParsingBox(header.box_type()),
+    );
 
     let mut buf = BytesMut::zeroed(box_data_size as usize);
-    reader
-        .read_exact(&mut buf)
-        .map_eof(|_| Error::Parse(ParseError::TruncatedBox))?;
-
+    reader.read_exact(&mut buf).map_eof(|_| {
+        Error::Parse(report_attach!(
+            ParseError::TruncatedBox,
+            WhileParsingBox(header.box_type())
+        ))
+    })?;
     Ok(Mp4Box { header, data: BoxData::Bytes(buf) })
 }
 
@@ -287,9 +313,12 @@ fn skip_box<R: Read + Skip>(reader: &mut BufReader<R>, header: &BoxHeader) -> Re
         Some(box_size) => box_size,
         None => reader.stream_len()? - reader.stream_position()?,
     };
-    reader
-        .skip(box_data_size)
-        .map_eof(|_| Error::Parse(ParseError::TruncatedBox))?;
+    reader.skip(box_data_size).map_eof(|_| {
+        Error::Parse(report_attach!(
+            ParseError::TruncatedBox,
+            WhileParsingBox(header.box_type())
+        ))
+    })?;
     Ok(box_data_size)
 }
 
@@ -316,6 +345,16 @@ impl<T: Read + Skip> BufReaderSkipExt for BufReader<T> {
 
     fn stream_len(&mut self) -> io::Result<u64> {
         self.get_mut().stream_len()
+    }
+}
+
+//
+// Error impls
+//
+
+impl From<Report<ParseError>> for Error {
+    fn from(from: Report<ParseError>) -> Self {
+        Self::Parse(from)
     }
 }
 

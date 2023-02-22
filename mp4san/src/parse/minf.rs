@@ -1,5 +1,7 @@
 use bytes::{BufMut, BytesMut};
+use error_stack::Result;
 
+use super::error::ParseResultExt;
 use super::mp4box::{Boxes, ParseBox};
 use super::{BoxType, ParseError, ParsedBox, StblBox};
 
@@ -12,13 +14,13 @@ const NAME: BoxType = BoxType::MINF;
 
 impl MinfBox {
     pub fn stbl_mut(&mut self) -> Result<&mut StblBox, ParseError> {
-        self.children.get_one_mut()
+        self.children.get_one_mut().while_parsing_child(NAME, BoxType::STBL)
     }
 }
 
 impl ParseBox for MinfBox {
     fn parse(buf: &mut BytesMut) -> Result<Self, ParseError> {
-        let children = Boxes::parse(buf)?;
+        let children = Boxes::parse(buf).while_parsing_field(NAME, "children")?;
         Ok(Self { children })
     }
 

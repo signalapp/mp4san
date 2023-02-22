@@ -1,5 +1,7 @@
 use bytes::{BufMut, BytesMut};
+use error_stack::Result;
 
+use super::error::ParseResultExt;
 use super::mp4box::Boxes;
 use super::{BoxType, MdiaBox, ParseBox, ParseError, ParsedBox};
 
@@ -12,13 +14,13 @@ const NAME: BoxType = BoxType::TRAK;
 
 impl TrakBox {
     pub fn mdia_mut(&mut self) -> Result<&mut MdiaBox, ParseError> {
-        self.children.get_one_mut()
+        self.children.get_one_mut().while_parsing_child(NAME, BoxType::MDIA)
     }
 }
 
 impl ParseBox for TrakBox {
     fn parse(buf: &mut BytesMut) -> Result<Self, ParseError> {
-        let children = Boxes::parse(buf)?;
+        let children = Boxes::parse(buf).while_parsing_field(NAME, "children")?;
         Ok(Self { children })
     }
 

@@ -1,5 +1,5 @@
 mod co64;
-mod error;
+pub(crate) mod error;
 mod fourcc;
 mod ftyp;
 mod header;
