@@ -1,9 +1,9 @@
 use std::fmt;
 use std::io;
-use std::io::Read;
 
 use bytes::{Buf, BufMut};
 use error_stack::Result;
+use futures::{pin_mut, AsyncRead, AsyncReadExt};
 
 use super::error::ParseResultExt;
 use super::{Mpeg4Int, ParseError};
@@ -18,9 +18,10 @@ impl FourCC {
         4
     }
 
-    pub fn read<R: Read>(mut input: R) -> io::Result<Self> {
+    pub(crate) async fn read<R: AsyncRead>(input: R) -> io::Result<Self> {
         let mut value = [0; 4];
-        input.read_exact(&mut value)?;
+        pin_mut!(input);
+        input.read_exact(&mut value).await?;
         Ok(Self { value })
     }
 

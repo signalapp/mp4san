@@ -7,11 +7,17 @@ mod macros;
 pub mod parse;
 mod util;
 
-use std::io::{self, BufRead, BufReader, Read, Seek};
+use std::future::poll_fn;
+use std::io;
+use std::io::{Read, Seek};
+use std::pin::Pin;
+use std::task::{ready, Context, Poll};
 
 use bytes::BytesMut;
 use derive_more::Display;
 use error_stack::Report;
+use futures::io::BufReader;
+use futures::{pin_mut, AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncSeek, FutureExt};
 
 use crate::parse::error::{MultipleBoxes, WhileParsingBox};
 use crate::parse::{BoxData, BoxHeader, BoxType, FourCC, FtypBox, MoovBox, Mp4Box, ParseBox, ParseError, StblCoMut};
@@ -57,28 +63,30 @@ pub trait Skip {
     fn stream_len(&mut self) -> io::Result<u64>;
 }
 
+/// A subset of the [`AsyncSeek`] trait, providing a cursor which can skip forward within a stream of bytes.
+///
+/// [`AsyncSkip`] is automatically implemented for all types implementing [`AsyncSeek`].
+pub trait AsyncSkip {
+    /// Skip an amount of bytes in a stream.
+    ///
+    /// A skip beyond the end of a stream is allowed, but behavior is defined by the implementation.
+    fn poll_skip(self: Pin<&mut Self>, cx: &mut Context<'_>, amount: u64) -> Poll<io::Result<()>>;
+
+    /// Returns the current position of the cursor from the start of the stream.
+    fn poll_stream_position(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<u64>>;
+
+    /// Returns the length of this stream, in bytes.
+    fn poll_stream_len(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<u64>>;
+}
+
 pub const COMPATIBLE_BRAND: FourCC = FourCC { value: *b"isom" };
 
 //
 // private types
 //
 
-/// [`Skip`] extension trait for [`BufReader`].
-///
-/// The blanket implementation of [`Skip`] for types implementing [`Seek`] means that [`Skip`] can't be implemented for
-/// [`BufReader<T>`] when `T` is only [`Skip`] and not [`Seek`]. This trait fixes that.
-trait BufReaderSkipExt {
-    /// Skip an amount of bytes in a stream.
-    ///
-    /// A skip beyond the end of a stream is allowed, but behavior is defined by the implementation.
-    fn skip(&mut self, amount: u64) -> io::Result<()>;
-
-    /// Returns the current position of the cursor from the start of the stream.
-    fn stream_position(&mut self) -> io::Result<u64>;
-
-    /// Returns the length of this stream, in bytes.
-    fn stream_len(&mut self) -> io::Result<u64>;
-}
+/// An adapter for [`Read`] + [`Skip`] types implementing [`AsyncRead`] + [`AsyncSkip`].
+struct AsyncInputAdapter<T>(T);
 
 #[derive(Clone, Copy, Debug, Display)]
 #[display(fmt = "box data too large: {} > {}", _0, MAX_READ_BOX_SIZE)]
@@ -90,22 +98,28 @@ const MAX_READ_BOX_SIZE: u64 = 200 * 1024 * 1024;
 // public functions
 //
 
-pub fn sanitize<R: Read + Skip>(input: R) -> Result<SanitizedMetadata, Error> {
-    let mut reader = BufReader::with_capacity(BoxHeader::MAX_SIZE as usize, input);
+pub fn sanitize<R: Read + Skip + Unpin>(input: R) -> Result<SanitizedMetadata, Error> {
+    sanitize_async(AsyncInputAdapter(input)).now_or_never().unwrap()
+}
+
+pub async fn sanitize_async<R: AsyncRead + AsyncSkip>(input: R) -> Result<SanitizedMetadata, Error> {
+    let reader = BufReader::with_capacity(BoxHeader::MAX_SIZE as usize, input);
+    pin_mut!(reader);
 
     let mut ftyp: Option<Mp4Box<FtypBox>> = None;
     let mut moov: Option<Mp4Box<MoovBox>> = None;
     let mut data: Option<InputSpan> = None;
 
-    while !reader.fill_buf()?.is_empty() {
-        let start_pos = reader.stream_position()?;
+    while !reader.as_mut().fill_buf().await?.is_empty() {
+        let start_pos = stream_position(reader.as_mut()).await?;
 
         let header = BoxHeader::read(&mut reader)
+            .await
             .map_eof(|_| Error::Parse(report_attach!(ParseError::TruncatedBox, "while parsing box header")))?;
 
         match header.box_type() {
             BoxType::FREE => {
-                let box_size = skip_box(&mut reader, &header)? + header.encoded_len();
+                let box_size = skip_box(reader.as_mut(), &header).await? + header.encoded_len();
                 log::info!("free @ 0x{start_pos:08x}: {box_size} bytes");
 
                 // Try to extend any already accumulated data in case there's more mdat boxes to come.
@@ -122,7 +136,7 @@ pub fn sanitize<R: Read + Skip>(input: R) -> Result<SanitizedMetadata, Error> {
                     ParseError::InvalidBoxLayout,
                     MultipleBoxes(BoxType::FTYP)
                 );
-                let mut read_ftyp = read_box(&mut reader, header)?;
+                let mut read_ftyp = read_box(reader.as_mut(), header).await?;
                 let ftyp_data = read_ftyp.data.parse()?;
                 log::info!("ftyp @ 0x{start_pos:08x}: {ftyp_data:#?}");
                 ftyp = Some(read_ftyp);
@@ -137,7 +151,7 @@ pub fn sanitize<R: Read + Skip>(input: R) -> Result<SanitizedMetadata, Error> {
             }
 
             BoxType::MDAT => {
-                let box_size = skip_box(&mut reader, &header)? + header.encoded_len();
+                let box_size = skip_box(reader.as_mut(), &header).await? + header.encoded_len();
                 log::info!("mdat @ 0x{start_pos:08x}: {box_size} bytes");
 
                 if let Some(data) = &mut data {
@@ -153,13 +167,13 @@ pub fn sanitize<R: Read + Skip>(input: R) -> Result<SanitizedMetadata, Error> {
                 }
             }
             BoxType::MOOV => {
-                let mut read_moov = read_box(&mut reader, header)?;
+                let mut read_moov = read_box(reader.as_mut(), header).await?;
                 let moov_data = read_moov.data.parse()?;
                 log::info!("moov @ 0x{start_pos:08x}: {moov_data:#?}");
                 moov = Some(read_moov);
             }
             name => {
-                let box_size = skip_box(&mut reader, &header)? + header.encoded_len();
+                let box_size = skip_box(reader.as_mut(), &header).await? + header.encoded_len();
                 log::info!("{name} @ 0x{start_pos:08x}: {box_size} bytes");
                 return Err(report!(ParseError::UnsupportedBox(name)).into());
             }
@@ -274,18 +288,57 @@ impl<T: Seek> Skip for T {
 }
 
 //
+// AsyncSkip impls
+//
+
+impl<T: AsyncSeek> AsyncSkip for T {
+    fn poll_skip(mut self: Pin<&mut Self>, cx: &mut Context<'_>, amount: u64) -> Poll<io::Result<()>> {
+        match amount.try_into() {
+            Ok(0) => (),
+            Ok(amount) => {
+                ready!(self.poll_seek(cx, io::SeekFrom::Current(amount)))?;
+            }
+            Err(_) => {
+                let stream_pos = ready!(self.as_mut().poll_stream_position(cx))?;
+                let seek_pos = stream_pos
+                    .checked_add(amount)
+                    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "seek past u64::MAX"))?;
+                ready!(self.poll_seek(cx, io::SeekFrom::Start(seek_pos)))?;
+            }
+        }
+        Ok(()).into()
+    }
+
+    fn poll_stream_position(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<u64>> {
+        self.poll_seek(cx, io::SeekFrom::Current(0))
+    }
+
+    fn poll_stream_len(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<u64>> {
+        // This is the unstable Seek::stream_len
+        let stream_pos = ready!(self.as_mut().poll_stream_position(cx))?;
+        let len = ready!(self.as_mut().poll_seek(cx, io::SeekFrom::End(0)))?;
+
+        if stream_pos != len {
+            ready!(self.poll_seek(cx, io::SeekFrom::Start(stream_pos)))?;
+        }
+
+        Ok(len).into()
+    }
+}
+
+//
 // private functions
 //
 
 /// Read and parse a box's data assuming its header has already been read.
-fn read_box<R, T>(reader: &mut BufReader<R>, header: BoxHeader) -> Result<Mp4Box<T>, Error>
+async fn read_box<R, T>(mut reader: Pin<&mut BufReader<R>>, header: BoxHeader) -> Result<Mp4Box<T>, Error>
 where
-    R: Read + Skip,
+    R: AsyncRead + AsyncSkip,
     T: ParseBox,
 {
     let box_data_size = match header.box_data_size()? {
         Some(box_data_size) => box_data_size,
-        None => reader.stream_len()? - reader.stream_position()?,
+        None => stream_len(reader.as_mut()).await? - stream_position(reader.as_mut()).await?,
     };
 
     ensure_attach!(
@@ -296,7 +349,7 @@ where
     );
 
     let mut buf = BytesMut::zeroed(box_data_size as usize);
-    reader.read_exact(&mut buf).map_eof(|_| {
+    reader.read_exact(&mut buf).await.map_eof(|_| {
         Error::Parse(report_attach!(
             ParseError::TruncatedBox,
             WhileParsingBox(header.box_type())
@@ -308,12 +361,15 @@ where
 /// Skip a box's data assuming its header has already been read.
 ///
 /// Returns the amount of data that was skipped.
-fn skip_box<R: Read + Skip>(reader: &mut BufReader<R>, header: &BoxHeader) -> Result<u64, Error> {
+async fn skip_box<R: AsyncRead + AsyncSkip>(
+    mut reader: Pin<&mut BufReader<R>>,
+    header: &BoxHeader,
+) -> Result<u64, Error> {
     let box_data_size = match header.box_data_size()? {
         Some(box_size) => box_size,
-        None => reader.stream_len()? - reader.stream_position()?,
+        None => stream_len(reader.as_mut()).await? - stream_position(reader.as_mut()).await?,
     };
-    reader.skip(box_data_size).map_eof(|_| {
+    skip(reader, box_data_size).await.map_eof(|_| {
         Error::Parse(report_attach!(
             ParseError::TruncatedBox,
             WhileParsingBox(header.box_type())
@@ -322,31 +378,59 @@ fn skip_box<R: Read + Skip>(reader: &mut BufReader<R>, header: &BoxHeader) -> Re
     Ok(box_data_size)
 }
 
-//
-// BufReaderSkipExt impls
-//
-
-impl<T: Read + Skip> BufReaderSkipExt for BufReader<T> {
-    fn skip(&mut self, amount: u64) -> io::Result<()> {
-        let buf_len = self.buffer().len();
-        if let Some(skip_amount) = amount.checked_sub(buf_len as u64) {
-            if skip_amount != 0 {
-                self.get_mut().skip(skip_amount)?;
-            }
+async fn skip<R: AsyncRead + AsyncSkip>(mut reader: Pin<&mut BufReader<R>>, amount: u64) -> io::Result<()> {
+    let buf_len = reader.buffer().len();
+    if let Some(skip_amount) = amount.checked_sub(buf_len as u64) {
+        if skip_amount != 0 {
+            poll_fn(|cx| reader.as_mut().get_pin_mut().poll_skip(cx, skip_amount)).await?;
         }
-        self.consume(buf_len.min(amount as usize));
-        Ok(())
+    }
+    reader.consume(buf_len.min(amount as usize));
+    Ok(())
+}
+
+async fn stream_position<R: AsyncRead + AsyncSkip>(mut reader: Pin<&mut BufReader<R>>) -> io::Result<u64> {
+    let stream_pos = poll_fn(|cx| reader.as_mut().get_pin_mut().poll_stream_position(cx)).await?;
+    Ok(stream_pos.saturating_sub(reader.buffer().len() as u64))
+}
+
+async fn stream_len<R: AsyncRead + AsyncSkip>(mut reader: Pin<&mut BufReader<R>>) -> io::Result<u64> {
+    poll_fn(|cx| reader.as_mut().get_pin_mut().poll_stream_len(cx)).await
+}
+
+//
+// AsyncInputAdapter
+//
+
+impl<T: Read + Unpin> AsyncRead for AsyncInputAdapter<T> {
+    fn poll_read(mut self: Pin<&mut Self>, _cx: &mut Context<'_>, buf: &mut [u8]) -> Poll<io::Result<usize>> {
+        self.0.read(buf).into()
     }
 
-    fn stream_position(&mut self) -> io::Result<u64> {
-        let stream_pos = self.get_mut().stream_position()?;
-        Ok(stream_pos.saturating_sub(self.buffer().len() as u64))
-    }
-
-    fn stream_len(&mut self) -> io::Result<u64> {
-        self.get_mut().stream_len()
+    fn poll_read_vectored(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        bufs: &mut [io::IoSliceMut<'_>],
+    ) -> Poll<io::Result<usize>> {
+        self.0.read_vectored(bufs).into()
     }
 }
+
+impl<T: Skip + Unpin> AsyncSkip for AsyncInputAdapter<T> {
+    fn poll_skip(mut self: Pin<&mut Self>, _cx: &mut Context<'_>, amount: u64) -> Poll<io::Result<()>> {
+        self.0.skip(amount).into()
+    }
+
+    fn poll_stream_position(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<u64>> {
+        self.0.stream_position().into()
+    }
+
+    fn poll_stream_len(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<u64>> {
+        self.0.stream_len().into()
+    }
+}
+
+impl<T: Unpin> Unpin for AsyncInputAdapter<T> {}
 
 //
 // Error impls

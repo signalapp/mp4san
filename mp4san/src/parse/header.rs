@@ -1,11 +1,13 @@
 use std::fmt;
 use std::io;
-use std::io::Read;
 use std::mem::size_of;
 
 use bytes::{Buf, BufMut};
 use derive_more::{Display, From};
 use error_stack::Result;
+use futures::{pin_mut, AsyncRead, AsyncReadExt, FutureExt};
+
+use crate::AsyncInputAdapter;
 
 use super::error::WhileParsingBox;
 use super::{FourCC, ParseError};
@@ -63,24 +65,29 @@ impl BoxHeader {
         Self { box_type, box_size: BoxSize::UntilEof }
     }
 
-    pub fn parse<B: Buf>(input: B) -> Result<Self, ParseError> {
-        Self::read(input.reader()).map_err(|err| {
-            assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
-            report_attach!(ParseError::TruncatedBox, "while parsing box header")
-        })
+    pub fn parse<B: Buf + Unpin>(input: B) -> Result<Self, ParseError> {
+        Self::read(AsyncInputAdapter(input.reader()))
+            .now_or_never()
+            .unwrap()
+            .map_err(|err| {
+                assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
+                report_attach!(ParseError::TruncatedBox, "while parsing box header")
+            })
     }
 
-    pub fn read<R: Read>(mut input: R) -> io::Result<Self> {
-        let mut size = [0; 4];
-        input.read_exact(&mut size)?;
+    pub(crate) async fn read<R: AsyncRead>(input: R) -> io::Result<Self> {
+        pin_mut!(input);
 
-        let name = FourCC::read(&mut input)?;
+        let mut size = [0; 4];
+        input.read_exact(&mut size).await?;
+
+        let name = FourCC::read(&mut input).await?;
 
         let size = match u32::from_be_bytes(size) {
             0 => BoxSize::UntilEof,
             1 => {
                 let mut size = [0; 8];
-                input.read_exact(&mut size)?;
+                input.read_exact(&mut size).await?;
                 BoxSize::Ext(u64::from_be_bytes(size))
             }
             size => BoxSize::Size(size),
@@ -89,7 +96,7 @@ impl BoxHeader {
         let name = match name {
             FourCC::UUID => {
                 let mut uuid = [0; 16];
-                input.read_exact(&mut uuid)?;
+                input.read_exact(&mut uuid).await?;
                 BoxType::Uuid(BoxUuid(uuid))
             }
             fourcc => fourcc.into(),
