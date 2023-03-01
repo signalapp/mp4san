@@ -6,7 +6,7 @@ use derive_more::Display;
 
 use super::{BoxType, FourCC};
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum ParseError {
     #[error("Invalid box layout")]
     InvalidBoxLayout,
