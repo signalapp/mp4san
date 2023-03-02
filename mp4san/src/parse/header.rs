@@ -10,7 +10,7 @@ use futures::{pin_mut, AsyncRead, AsyncReadExt, FutureExt};
 use crate::AsyncInputAdapter;
 
 use super::error::WhileParsingBox;
-use super::{FourCC, ParseError};
+use super::{FourCC, Mpeg4Int, ParseError};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BoxHeader {
@@ -34,6 +34,12 @@ pub enum BoxType {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct BoxUuid(pub [u8; 16]);
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FullBoxHeader {
+    pub version: u8,
+    pub flags: u32,
+}
 
 impl BoxHeader {
     pub const MAX_SIZE: u64 = 32;
@@ -205,6 +211,42 @@ impl fmt::Display for BoxUuid {
             fmt,
             "{a:02x}{b:02x}{c:02x}{d:02x}-{e:02x}{f:02x}-{g:02x}{h:02x}-{i:02x}{j:02x}-{k:02x}{l:02x}{m:02x}{n:02x}{o:02x}{p:02x}",
         )
+    }
+}
+
+impl FullBoxHeader {
+    pub const fn default() -> Self {
+        Self { version: 0, flags: 0 }
+    }
+
+    pub fn parse<B: Buf>(mut buf: B) -> Result<Self, ParseError> {
+        let version = u8::parse(&mut buf)?;
+        let flags = <[u8; 3]>::parse(&mut buf)?;
+        let flags = u32::from_be_bytes([0, flags[0], flags[1], flags[2]]);
+        Ok(Self { version, flags })
+    }
+
+    pub const fn encoded_len(&self) -> u64 {
+        4
+    }
+
+    pub fn ensure_eq(&self, other: &Self) -> Result<(), ParseError> {
+        ensure_attach!(
+            self.version == other.version,
+            ParseError::InvalidInput,
+            format!("box version {} does not match {}", self.version, other.version),
+        );
+        ensure_attach!(
+            self.flags == other.flags,
+            ParseError::InvalidInput,
+            format!("box flags 0b{:024b} do not match 0b{:024b}", self.flags, other.flags),
+        );
+        Ok(())
+    }
+
+    pub fn put_buf<B: BufMut>(&self, mut out: B) {
+        out.put_u8(self.version);
+        out.put_uint(self.flags.into(), 3);
     }
 }
 

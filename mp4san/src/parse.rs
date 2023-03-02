@@ -1,3 +1,4 @@
+pub(self) mod co;
 mod co64;
 pub(crate) mod error;
 mod fourcc;
@@ -12,16 +13,16 @@ mod stbl;
 mod stco;
 mod trak;
 
-pub use co64::Co64Box;
+pub use co64::{Co64Box, Co64Entry};
 pub use error::ParseError;
 pub use fourcc::FourCC;
 pub use ftyp::FtypBox;
-pub use header::{BoxHeader, BoxSize, BoxType};
-pub use integers::{Mpeg4Int, Mpeg4IntReaderExt};
+pub use header::{BoxHeader, BoxSize, BoxType, FullBoxHeader};
+pub use integers::{Mpeg4Int, Mpeg4IntReaderExt, Mpeg4IntWriterExt};
 pub use mdia::MdiaBox;
 pub use minf::MinfBox;
 pub use moov::MoovBox;
 pub use mp4box::{BoxData, Boxes, Mp4Box, ParseBox, ParsedBox};
 pub use stbl::{StblBox, StblCoMut};
-pub use stco::StcoBox;
+pub use stco::{StcoBox, StcoEntry};
 pub use trak::TrakBox;

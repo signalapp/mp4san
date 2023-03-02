@@ -1,55 +1,29 @@
-use std::convert::TryInto;
-use std::mem::{size_of, take};
-
 use bytes::{BufMut, BytesMut};
 use error_stack::Result;
 
-use super::error::WhileParsingField;
-use super::mp4box::ParseBox;
-use super::{BoxType, Mpeg4Int, ParseError, ParsedBox};
+use super::co::{CoBox, CoEntry};
+use super::{BoxType, ParseBox, ParseError, ParsedBox};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct StcoBox {
-    entries: BytesMut,
+    inner: CoBox<u32>,
 }
 
 pub struct StcoEntry<'a> {
-    data: &'a mut [u8; size_of::<u32>()],
+    inner: CoEntry<'a, u32>,
 }
 
 const NAME: BoxType = BoxType::STCO;
 
 impl StcoBox {
     pub fn entries_mut(&mut self) -> impl Iterator<Item = StcoEntry<'_>> + ExactSizeIterator + '_ {
-        self.entries
-            .chunks_exact_mut(size_of::<u32>())
-            .map(|data| StcoEntry { data: data.try_into().unwrap_or_else(|_| unreachable!()) })
+        self.inner.entries_mut().map(|inner| StcoEntry { inner })
     }
 }
 
 impl ParseBox for StcoBox {
-    fn parse(mut buf: &mut BytesMut) -> Result<Self, ParseError> {
-        let entry_count = u32::parse(&mut buf)?;
-        let entries_len = size_of::<u32>().checked_mul(entry_count as usize).ok_or_else(|| {
-            report_attach!(
-                ParseError::InvalidInput,
-                "overflow",
-                WhileParsingField(NAME, "entry_count"),
-            )
-        })?;
-        ensure_attach!(
-            entries_len >= buf.len(),
-            ParseError::InvalidInput,
-            "extra unparsed data",
-            WhileParsingField(NAME, "entries"),
-        );
-        ensure_attach!(
-            entries_len <= buf.len(),
-            ParseError::TruncatedBox,
-            WhileParsingField(NAME, "entries"),
-        );
-        let entries = take(buf);
-        Ok(Self { entries })
+    fn parse(buf: &mut BytesMut) -> Result<Self, ParseError> {
+        Ok(Self { inner: CoBox::parse(buf, NAME)? })
     }
 
     fn box_type() -> BoxType {
@@ -59,20 +33,36 @@ impl ParseBox for StcoBox {
 
 impl ParsedBox for StcoBox {
     fn encoded_len(&self) -> u64 {
-        self.entries.len() as u64
+        self.inner.encoded_len()
     }
 
     fn put_buf(&self, buf: &mut dyn BufMut) {
-        buf.put_slice(&self.entries[..])
+        self.inner.put_buf(buf)
     }
 }
 
 impl StcoEntry<'_> {
     pub fn get(&self) -> u32 {
-        u32::from_be_bytes(*self.data)
+        self.inner.get()
     }
 
     pub fn set(&mut self, value: u32) {
-        *self.data = value.to_be_bytes();
+        self.inner.set(value)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use bytes::BytesMut;
+
+    use crate::parse::{ParseBox, ParsedBox};
+
+    use super::StcoBox;
+
+    #[test]
+    fn roundtrip() {
+        let mut buf = BytesMut::new();
+        StcoBox::default().put_buf(&mut buf);
+        StcoBox::parse(&mut buf).unwrap();
     }
 }

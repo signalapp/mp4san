@@ -6,6 +6,7 @@ use error_stack::Result;
 use futures::{pin_mut, AsyncRead, AsyncReadExt};
 
 use super::error::ParseResultExt;
+use super::integers::Mpeg4IntWriterExt;
 use super::{Mpeg4Int, ParseError};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,6 +34,10 @@ impl FourCC {
 impl Mpeg4Int for FourCC {
     fn parse<B: Buf>(buf: B) -> Result<Self, ParseError> {
         Ok(FourCC { value: Mpeg4Int::parse(buf).while_parsing_type::<Self>()? })
+    }
+
+    fn put_buf<B: BufMut>(&self, mut buf: B) {
+        buf.put_mp4int(self.value);
     }
 }
 
