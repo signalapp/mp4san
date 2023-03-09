@@ -13,14 +13,13 @@ use std::io::{Read, Seek};
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 
-use bytes::BytesMut;
 use derive_more::Display;
 use error_stack::Report;
 use futures::io::BufReader;
-use futures::{pin_mut, AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncSeek, FutureExt};
+use futures::{pin_mut, AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncSeek, FutureExt};
 
 use crate::parse::error::{MultipleBoxes, WhileParsingBox};
-use crate::parse::{BoxData, BoxHeader, BoxType, FourCC, FtypBox, MoovBox, Mp4Box, ParseBox, ParseError, StblCoMut};
+use crate::parse::{BoxHeader, BoxType, FourCC, FtypBox, MoovBox, Mp4Box, ParseError, StblCoMut};
 use crate::util::{checked_add_signed, IoResultExt};
 
 //
@@ -136,7 +135,7 @@ pub async fn sanitize_async<R: AsyncRead + AsyncSkip>(input: R) -> Result<Saniti
                     ParseError::InvalidBoxLayout,
                     MultipleBoxes(BoxType::FTYP)
                 );
-                let mut read_ftyp = read_box(reader.as_mut(), header).await?;
+                let mut read_ftyp = Mp4Box::read_data(reader.as_mut(), header).await?;
                 let ftyp_data = read_ftyp.data.parse()?;
                 log::info!("ftyp @ 0x{start_pos:08x}: {ftyp_data:#?}");
                 ftyp = Some(read_ftyp);
@@ -167,7 +166,7 @@ pub async fn sanitize_async<R: AsyncRead + AsyncSkip>(input: R) -> Result<Saniti
                 }
             }
             BoxType::MOOV => {
-                let mut read_moov = read_box(reader.as_mut(), header).await?;
+                let mut read_moov = Mp4Box::read_data(reader.as_mut(), header).await?;
                 let moov_data = read_moov.data.parse()?;
                 log::info!("moov @ 0x{start_pos:08x}: {moov_data:#?}");
                 moov = Some(read_moov);
@@ -330,34 +329,6 @@ impl<T: AsyncSeek> AsyncSkip for T {
 // private functions
 //
 
-/// Read and parse a box's data assuming its header has already been read.
-async fn read_box<R, T>(mut reader: Pin<&mut BufReader<R>>, header: BoxHeader) -> Result<Mp4Box<T>, Error>
-where
-    R: AsyncRead + AsyncSkip,
-    T: ParseBox,
-{
-    let box_data_size = match header.box_data_size()? {
-        Some(box_data_size) => box_data_size,
-        None => stream_len(reader.as_mut()).await? - stream_position(reader.as_mut()).await?,
-    };
-
-    ensure_attach!(
-        box_data_size <= MAX_READ_BOX_SIZE,
-        ParseError::InvalidInput,
-        BoxDataTooLarge(box_data_size),
-        WhileParsingBox(header.box_type()),
-    );
-
-    let mut buf = BytesMut::zeroed(box_data_size as usize);
-    reader.read_exact(&mut buf).await.map_eof(|_| {
-        Error::Parse(report_attach!(
-            ParseError::TruncatedBox,
-            WhileParsingBox(header.box_type())
-        ))
-    })?;
-    Ok(Mp4Box { header, data: BoxData::Bytes(buf) })
-}
-
 /// Skip a box's data assuming its header has already been read.
 ///
 /// Returns the amount of data that was skipped.
@@ -455,7 +426,7 @@ mod test {
     }
 
     fn test_moov() -> Mp4Box<MoovBox> {
-        Mp4Box::with_data(MoovBox::default()).unwrap()
+        Mp4Box::with_data(MoovBox::empty()).unwrap()
     }
 
     fn write_test_mdat(out: &mut Vec<u8>, data: &[u8]) -> InputSpan {

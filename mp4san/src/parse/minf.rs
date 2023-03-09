@@ -7,7 +7,7 @@ use super::{BoxType, ParseError, ParsedBox, StblBox};
 
 #[derive(Clone, Debug)]
 pub struct MinfBox {
-    pub children: Boxes,
+    children: Boxes,
 }
 
 const NAME: BoxType = BoxType::MINF;

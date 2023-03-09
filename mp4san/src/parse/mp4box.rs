@@ -1,11 +1,18 @@
 use std::fmt::Debug;
 use std::mem::take;
+use std::pin::Pin;
+use std::result::Result as StdResult;
 
 use bytes::{Buf, BufMut, BytesMut};
 use derive_where::derive_where;
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clonable::clonable;
 use error_stack::Result;
+use futures::io::BufReader;
+use futures::{AsyncRead, AsyncReadExt};
+
+use crate::util::IoResultExt;
+use crate::{stream_len, stream_position, AsyncSkip, BoxDataTooLarge, Error, MAX_READ_BOX_SIZE};
 
 use super::error::{MultipleBoxes, ParseResultExt, WhileParsingBox};
 use super::{BoxHeader, BoxType, ParseError};
@@ -13,7 +20,7 @@ use super::{BoxHeader, BoxType, ParseError};
 #[derive(Debug)]
 #[derive_where(Clone; BoxData<T>)]
 pub struct Mp4Box<T: ?Sized> {
-    pub header: BoxHeader,
+    parsed_header: BoxHeader,
     pub data: BoxData<T>,
 }
 
@@ -41,7 +48,7 @@ pub trait ParsedBox: Clone + Debug + Downcast {
 
 #[derive(Clone, Debug, Default)]
 pub struct Boxes {
-    pub boxes: Vec<AnyMp4Box>,
+    boxes: Vec<AnyMp4Box>,
 }
 
 impl<T: ParsedBox + ?Sized> Mp4Box<T> {
@@ -49,29 +56,57 @@ impl<T: ParsedBox + ?Sized> Mp4Box<T> {
     where
         T: ParseBox,
     {
-        let header = BoxHeader::with_data_size(T::box_type(), data.encoded_len())?;
-        Ok(Self { header, data: BoxData::Parsed(Box::new(data)) })
+        let parsed_header = BoxHeader::with_data_size(T::box_type(), data.encoded_len())?;
+        Ok(Self { parsed_header, data: BoxData::Parsed(Box::new(data)) })
     }
 
     pub fn parse(mut buf: &mut BytesMut) -> Result<Self, ParseError> {
-        let header = BoxHeader::parse(&mut buf).while_parsing_type::<Self>()?;
-        let data = BoxData::get_from_bytes_mut(buf, &header).while_parsing_type::<Self>()?;
-        Ok(Self { header, data })
+        let parsed_header = BoxHeader::parse(&mut buf).while_parsing_type::<Self>()?;
+        let data = BoxData::get_from_bytes_mut(buf, &parsed_header).while_parsing_type::<Self>()?;
+        Ok(Self { parsed_header, data })
+    }
+
+    /// Read and parse a box's data assuming its header has already been read.
+    pub(crate) async fn read_data<R>(mut reader: Pin<&mut BufReader<R>>, header: BoxHeader) -> StdResult<Self, Error>
+    where
+        R: AsyncRead + AsyncSkip,
+        T: ParseBox,
+    {
+        let box_data_size = match header.box_data_size()? {
+            Some(box_data_size) => box_data_size,
+            None => stream_len(reader.as_mut()).await? - stream_position(reader.as_mut()).await?,
+        };
+
+        ensure_attach!(
+            box_data_size <= MAX_READ_BOX_SIZE,
+            ParseError::InvalidInput,
+            BoxDataTooLarge(box_data_size),
+            WhileParsingBox(header.box_type()),
+        );
+
+        let mut buf = BytesMut::zeroed(box_data_size as usize);
+        reader.read_exact(&mut buf).await.map_eof(|_| {
+            Error::Parse(report_attach!(
+                ParseError::TruncatedBox,
+                WhileParsingBox(header.box_type())
+            ))
+        })?;
+        Ok(Self { parsed_header: header, data: BoxData::Bytes(buf) })
     }
 
     pub fn parse_data_as<U: ParseBox + ParsedBox + Into<Box<T>>>(&mut self) -> Result<Option<&mut U>, ParseError> {
-        if self.header.box_type() != U::box_type() {
+        if self.parsed_header.box_type() != U::box_type() {
             return Ok(None);
         }
         self.data.parse_as()
     }
 
     pub fn encoded_len(&self) -> u64 {
-        self.header.encoded_len() + self.data.encoded_len() as u64
+        self.parsed_header.encoded_len() + self.data.encoded_len()
     }
 
     pub fn put_buf<B: BufMut>(&self, mut out: B) {
-        self.header.put_buf(&mut out);
+        self.parsed_header.put_buf(&mut out);
         self.data.put_buf(&mut out);
     }
 }
@@ -176,7 +211,7 @@ impl Boxes {
     }
 
     pub fn box_types(&self) -> impl Iterator<Item = BoxType> + ExactSizeIterator + '_ {
-        self.boxes.iter().map(|mp4box| mp4box.header.box_type())
+        self.boxes.iter().map(|mp4box| mp4box.parsed_header.box_type())
     }
 
     pub fn encoded_len(&self) -> u64 {

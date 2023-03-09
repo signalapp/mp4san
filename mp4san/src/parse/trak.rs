@@ -7,7 +7,7 @@ use super::{BoxType, MdiaBox, ParseBox, ParseError, ParsedBox};
 
 #[derive(Clone, Debug)]
 pub struct TrakBox {
-    pub children: Boxes,
+    children: Boxes,
 }
 
 const NAME: BoxType = BoxType::TRAK;

@@ -7,7 +7,7 @@ use super::{BoxType, Co64Box, ParseError, ParsedBox, StcoBox};
 
 #[derive(Clone, Debug)]
 pub struct StblBox {
-    pub children: Boxes,
+    children: Boxes,
 }
 
 #[derive(Debug)]

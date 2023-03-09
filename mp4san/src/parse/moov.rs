@@ -5,7 +5,7 @@ use super::error::ParseResultExt;
 use super::mp4box::Boxes;
 use super::{BoxType, ParseBox, ParseError, ParsedBox, TrakBox};
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct MoovBox {
     children: Boxes,
 }
@@ -13,6 +13,11 @@ pub struct MoovBox {
 const NAME: BoxType = BoxType::MOOV;
 
 impl MoovBox {
+    #[cfg(test)]
+    pub(crate) fn empty() -> Self {
+        Self { children: Default::default() }
+    }
+
     pub fn traks(&mut self) -> impl Iterator<Item = Result<&mut TrakBox, ParseError>> + '_ {
         self.children
             .get_mut()
