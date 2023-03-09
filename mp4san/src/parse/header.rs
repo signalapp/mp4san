@@ -7,7 +7,7 @@ use derive_more::{Display, From};
 use error_stack::Result;
 use futures::{pin_mut, AsyncRead, AsyncReadExt, FutureExt};
 
-use crate::AsyncInputAdapter;
+use crate::sync::buf_async_reader;
 
 use super::error::WhileParsingBox;
 use super::{FourCC, Mpeg4Int, ParseError};
@@ -72,7 +72,7 @@ impl BoxHeader {
     }
 
     pub fn parse<B: Buf + Unpin>(input: B) -> Result<Self, ParseError> {
-        Self::read(AsyncInputAdapter(input.reader()))
+        Self::read(buf_async_reader(input))
             .now_or_never()
             .unwrap()
             .map_err(|err| {

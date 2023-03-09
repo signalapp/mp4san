@@ -5,6 +5,7 @@ extern crate error_stack;
 mod macros;
 
 pub mod parse;
+mod sync;
 mod util;
 
 use std::future::poll_fn;
@@ -16,7 +17,7 @@ use std::task::{ready, Context, Poll};
 use derive_more::Display;
 use error_stack::Report;
 use futures::io::BufReader;
-use futures::{pin_mut, AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncSeek, FutureExt};
+use futures::{pin_mut, AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncSeek};
 
 use crate::parse::error::{MultipleBoxes, WhileParsingBox};
 use crate::parse::{BoxHeader, BoxType, FourCC, FtypBox, MoovBox, Mp4Box, ParseError, StblCoMut};
@@ -84,9 +85,6 @@ pub const COMPATIBLE_BRAND: FourCC = FourCC { value: *b"isom" };
 // private types
 //
 
-/// An adapter for [`Read`] + [`Skip`] types implementing [`AsyncRead`] + [`AsyncSkip`].
-struct AsyncInputAdapter<T>(T);
-
 #[derive(Clone, Copy, Debug, Display)]
 #[display(fmt = "box data too large: {} > {}", _0, MAX_READ_BOX_SIZE)]
 struct BoxDataTooLarge(u64);
@@ -98,7 +96,7 @@ const MAX_READ_BOX_SIZE: u64 = 200 * 1024 * 1024;
 //
 
 pub fn sanitize<R: Read + Skip + Unpin>(input: R) -> Result<SanitizedMetadata, Error> {
-    sanitize_async(AsyncInputAdapter(input)).now_or_never().unwrap()
+    sync::sanitize(input)
 }
 
 pub async fn sanitize_async<R: AsyncRead + AsyncSkip>(input: R) -> Result<SanitizedMetadata, Error> {
@@ -368,40 +366,6 @@ async fn stream_position<R: AsyncRead + AsyncSkip>(mut reader: Pin<&mut BufReade
 async fn stream_len<R: AsyncRead + AsyncSkip>(mut reader: Pin<&mut BufReader<R>>) -> io::Result<u64> {
     poll_fn(|cx| reader.as_mut().get_pin_mut().poll_stream_len(cx)).await
 }
-
-//
-// AsyncInputAdapter
-//
-
-impl<T: Read + Unpin> AsyncRead for AsyncInputAdapter<T> {
-    fn poll_read(mut self: Pin<&mut Self>, _cx: &mut Context<'_>, buf: &mut [u8]) -> Poll<io::Result<usize>> {
-        self.0.read(buf).into()
-    }
-
-    fn poll_read_vectored(
-        mut self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-        bufs: &mut [io::IoSliceMut<'_>],
-    ) -> Poll<io::Result<usize>> {
-        self.0.read_vectored(bufs).into()
-    }
-}
-
-impl<T: Skip + Unpin> AsyncSkip for AsyncInputAdapter<T> {
-    fn poll_skip(mut self: Pin<&mut Self>, _cx: &mut Context<'_>, amount: u64) -> Poll<io::Result<()>> {
-        self.0.skip(amount).into()
-    }
-
-    fn poll_stream_position(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<u64>> {
-        self.0.stream_position().into()
-    }
-
-    fn poll_stream_len(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<u64>> {
-        self.0.stream_len().into()
-    }
-}
-
-impl<T: Unpin> Unpin for AsyncInputAdapter<T> {}
 
 //
 // Error impls
