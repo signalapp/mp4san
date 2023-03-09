@@ -94,6 +94,17 @@ impl<T: ParsedBox + ?Sized> Mp4Box<T> {
         Ok(Self { parsed_header: header, data: BoxData::Bytes(buf) })
     }
 
+    pub fn calculated_header(&self) -> BoxHeader {
+        let data_len = self.data.encoded_len();
+        match self.parsed_header.box_data_size() {
+            Ok(Some(parsed_header_data_len)) if parsed_header_data_len != data_len => {
+                BoxHeader::with_data_size(self.parsed_header.box_type(), data_len)
+                    .expect("parsed box data length cannot overflow a u64")
+            }
+            _ => self.parsed_header,
+        }
+    }
+
     pub fn parse_data_as<U: ParseBox + ParsedBox + Into<Box<T>>>(&mut self) -> Result<Option<&mut U>, ParseError> {
         if self.parsed_header.box_type() != U::box_type() {
             return Ok(None);
@@ -102,11 +113,11 @@ impl<T: ParsedBox + ?Sized> Mp4Box<T> {
     }
 
     pub fn encoded_len(&self) -> u64 {
-        self.parsed_header.encoded_len() + self.data.encoded_len()
+        self.calculated_header().encoded_len() + self.data.encoded_len()
     }
 
     pub fn put_buf<B: BufMut>(&self, mut out: B) {
-        self.parsed_header.put_buf(&mut out);
+        self.calculated_header().put_buf(&mut out);
         self.data.put_buf(&mut out);
     }
 }
