@@ -391,25 +391,88 @@ impl From<Report<ParseError>> for Error {
 
 #[cfg(test)]
 mod test {
+    use std::iter;
+
+    use assert_matches::assert_matches;
     use bytes::{Buf, Bytes};
     use derive_builder::Builder;
 
-    use crate::parse::{MdiaBox, MinfBox, StblBox, StcoBox, TrakBox};
+    use crate::parse::box_type::*;
+    use crate::parse::{BoxUuid, Co64Box, MdiaBox, MinfBox, StblBox, StcoBox, TrakBox};
     use crate::util::test::init_logger;
 
     use super::*;
 
-    fn test_ftyp() -> Mp4Box<FtypBox> {
-        Mp4Box::with_data(FtypBox::new(COMPATIBLE_BRAND, 0, [COMPATIBLE_BRAND]).into()).unwrap()
+    const TEST_UUID: BoxType = BoxType::Uuid(BoxUuid(*b"thisisatestuuid!"));
+    const MP42: FourCC = FourCC { value: *b"mp42" };
+    const MP41: FourCC = FourCC { value: *b"mp41" };
+    const ISOM: FourCC = FourCC { value: *b"isom" };
+
+    fn test_ftyp(major_brand: FourCC, compatible_brands: Vec<FourCC>) -> Mp4Box<FtypBox> {
+        Mp4Box::with_data(FtypBox::new(major_brand, 0, compatible_brands).into()).unwrap()
     }
 
-    fn test_moov<I: IntoIterator<Item = u32>>(entries: I) -> Mp4Box<MoovBox> {
-        let stco = Mp4Box::with_data(StcoBox::with_entries(entries).into()).unwrap();
-        let stbl = Mp4Box::with_data(StblBox::with_children(vec![stco.into()]).into()).unwrap();
-        let minf = Mp4Box::with_data(MinfBox::with_children(vec![stbl.into()]).into()).unwrap();
-        let mdia = Mp4Box::with_data(MdiaBox::with_children(vec![minf.into()]).into()).unwrap();
-        let trak = Mp4Box::with_data(TrakBox::with_children(vec![mdia.into()]).into()).unwrap();
-        Mp4Box::with_data(MoovBox::with_children(vec![trak.into()]).into()).unwrap()
+    fn test_moov() -> TestMoovBuilder {
+        Default::default()
+    }
+
+    #[derive(Builder)]
+    #[builder(name = "TestMoovBuilder", build_fn(name = "build_spec"))]
+    struct TestMoovSpec {
+        #[builder(default)]
+        #[builder(setter(into))]
+        co_entries: Vec<u64>,
+
+        #[builder(default = "true")]
+        stco: bool,
+
+        #[builder(default)]
+        co64: bool,
+
+        #[builder(default = "true")]
+        stbl: bool,
+
+        #[builder(default = "true")]
+        minf: bool,
+
+        #[builder(default = "true")]
+        mdia: bool,
+
+        #[builder(default = "true")]
+        trak: bool,
+    }
+
+    impl TestMoovBuilder {
+        fn build(&self) -> Mp4Box<MoovBox> {
+            let spec = self.build_spec().unwrap();
+
+            let mut co = vec![];
+            if spec.co64 {
+                let entries = spec.co_entries.iter().cloned();
+                co.push(Mp4Box::with_data(Co64Box::with_entries(entries).into()).unwrap().into());
+            }
+            if spec.stco {
+                let entries = spec.co_entries.into_iter().map(|entry| entry as u32);
+                co.push(Mp4Box::with_data(StcoBox::with_entries(entries).into()).unwrap().into());
+            }
+            let stbl = match spec.stbl {
+                true => vec![Mp4Box::with_data(StblBox::with_children(co).into()).unwrap().into()],
+                false => vec![],
+            };
+            let minf = match spec.minf {
+                true => vec![Mp4Box::with_data(MinfBox::with_children(stbl).into()).unwrap().into()],
+                false => vec![],
+            };
+            let mdia = match spec.mdia {
+                true => vec![Mp4Box::with_data(MdiaBox::with_children(minf).into()).unwrap().into()],
+                false => vec![],
+            };
+            let trak = match spec.trak {
+                true => vec![Mp4Box::with_data(TrakBox::with_children(mdia).into()).unwrap().into()],
+                false => vec![],
+            };
+            Mp4Box::with_data(MoovBox::with_children(trak).into()).unwrap()
+        }
     }
 
     fn test_mp4() -> TestMp4Builder {
@@ -426,11 +489,21 @@ mod test {
     fn write_mdat_header(out: &mut Vec<u8>, data_len: Option<u64>) -> InputSpan {
         let offset = out.len() as u64;
         let header = match data_len {
-            Some(data_len) => BoxHeader::with_data_size(BoxType::MDAT, data_len).unwrap(),
-            None => BoxHeader::until_eof(BoxType::MDAT),
+            Some(data_len) => BoxHeader::with_data_size(MDAT, data_len).unwrap(),
+            None => BoxHeader::until_eof(MDAT),
         };
         header.put_buf(&mut *out);
         InputSpan { offset, len: out.len() as u64 - offset }
+    }
+
+    fn write_test_free(mut out: &mut Vec<u8>, len: u32) {
+        const FREE_HEADER_SIZE: u32 = BoxHeader::with_u32_data_size(FREE, 0).encoded_len() as u32;
+        BoxHeader::with_u32_data_size(FREE, len - FREE_HEADER_SIZE).put_buf(&mut out);
+        out.extend(iter::repeat(0).take((len - FREE_HEADER_SIZE) as usize));
+    }
+
+    fn write_test_uuid(out: &mut Vec<u8>) {
+        BoxHeader::with_u32_data_size(TEST_UUID, 0).put_buf(out);
     }
 
     fn sanitized_data(sanitized: SanitizedMetadata, data: &[u8]) -> Vec<u8> {
@@ -441,6 +514,16 @@ mod test {
     #[derive(Builder)]
     #[builder(name = "TestMp4Builder", build_fn(name = "build_spec"))]
     struct TestMp4Spec {
+        #[builder(default = "ISOM")]
+        major_brand: FourCC,
+
+        #[builder(default = "vec![ISOM]")]
+        #[builder(setter(into, each(name = "add_compatible_brand")))]
+        compatible_brands: Vec<FourCC>,
+
+        #[builder(default)]
+        moov: TestMoovBuilder,
+
         #[builder(default)]
         #[builder(setter(into, each(name = "add_mdat_data", into)))]
         mdat_data: Vec<u8>,
@@ -449,7 +532,7 @@ mod test {
         #[builder(setter(strip_option))]
         mdat_data_len: Option<u64>,
 
-        #[builder(default = "vec![BoxType::MOOV, BoxType::MDAT]")]
+        #[builder(default = "vec![FTYP, MOOV, MDAT]")]
         #[builder(setter(into, each(name = "add_box")))]
         boxes: Vec<BoxType>,
     }
@@ -458,7 +541,7 @@ mod test {
     struct TestMp4 {
         data: Bytes,
         data_len: u64,
-        metadata: Bytes,
+        expected_metadata: Bytes,
         mdat: InputSpan,
         mdat_skipped: u64,
     }
@@ -471,43 +554,91 @@ mod test {
 
         fn build(&self) -> TestMp4 {
             let spec = self.build_spec().unwrap();
+            let mut moov = spec.moov;
+            moov.co_entries(vec![0]);
 
             let mut data = vec![];
-            test_ftyp().put_buf(&mut data);
-
-            let mut mdat = None;
-            let mut moovs = Vec::new();
-            let mut stco_entries = [0];
+            let mut mdat: Option<InputSpan> = None;
+            let mut moov_offsets = Vec::new();
+            let mut metadata_free_len = 0;
             for box_type in &spec.boxes {
                 match *box_type {
-                    BoxType::MOOV => {
-                        moovs.push(data.len());
-                        test_moov(stco_entries).put_buf(&mut data);
+                    FTYP => {
+                        test_ftyp(spec.major_brand, spec.compatible_brands.clone()).put_buf(&mut data);
                     }
-                    BoxType::MDAT => {
+                    MOOV => {
+                        moov_offsets.push(data.len());
+                        moov.build().put_buf(&mut data);
+                    }
+                    MDAT => {
                         let written_mdat = write_mdat_header(&mut data, spec.mdat_data_len);
                         data.extend_from_slice(&spec.mdat_data);
 
                         let mdat_data_len = spec.mdat_data_len.unwrap_or(spec.mdat_data.len() as u64);
-                        mdat = Some(InputSpan { len: written_mdat.len.saturating_add(mdat_data_len), ..written_mdat });
+                        let mdat_len = written_mdat.len.saturating_add(mdat_data_len);
+                        match &mut mdat {
+                            Some(mdat) => mdat.len += mdat_len,
+                            None => mdat = Some(InputSpan { len: mdat_len, ..written_mdat }),
+                        }
+                    }
+                    FREE => {
+                        let free_len = 13;
+                        write_test_free(&mut data, free_len);
+                        match &mut mdat {
+                            Some(mdat) => mdat.len += free_len as u64,
+                            None => metadata_free_len += free_len,
+                        }
+                    }
+                    TEST_UUID => {
+                        write_test_uuid(&mut data);
                     }
                     _ => panic!("invalid box type for test {box_type}"),
                 }
             }
 
-            let mdat = mdat.unwrap();
-            for stco_entry in &mut stco_entries {
-                *stco_entry += mdat.offset as u32;
+            let mdat = mdat.unwrap_or(InputSpan { offset: data.len() as u64, len: 0 });
+
+            // Calculate and write correct chunk offsets
+            let mut co_entries = moov.build_spec().unwrap().co_entries;
+            for co_entry in &mut co_entries {
+                *co_entry += mdat.offset;
+            }
+            for moov_offset in &moov_offsets {
+                let moov = moov.co_entries(co_entries.clone()).build();
+                moov.put_buf(&mut data[*moov_offset..]);
             }
 
-            let mut metadata = vec![];
-            test_ftyp().put_buf(&mut metadata);
-            for moov in moovs {
-                test_moov(stco_entries).put_buf(&mut data[moov..]);
-                test_moov(stco_entries).put_buf(&mut metadata);
+            // Calculate expected output metadata. NB: The expectation that the output metadata matches the input
+            // metadata verbatim is overly-strict and could be weakened.
+            let mut expected_metadata = vec![];
+            test_ftyp(spec.major_brand, spec.compatible_brands).put_buf(&mut expected_metadata);
+            let mut expected_metadata_moov_offsets = Vec::new();
+            for _ in moov_offsets {
+                expected_metadata_moov_offsets.push(expected_metadata.len());
+                let moov = moov.co_entries(co_entries.clone()).build();
+                moov.put_buf(&mut expected_metadata);
+            }
+            if metadata_free_len != 0 {
+                write_test_free(&mut expected_metadata, metadata_free_len);
             }
 
-            TestMp4 { data_len: data.len() as u64, data: data.into(), metadata: metadata.into(), mdat, mdat_skipped: 0 }
+            // Calculate and write correct expected output chunk offsets
+            for co_entry in &mut co_entries {
+                *co_entry -= mdat.offset;
+                *co_entry += expected_metadata.len() as u64;
+            }
+            for expected_metadata_moov_offset in expected_metadata_moov_offsets {
+                let moov = moov.co_entries(co_entries.clone()).build();
+                moov.put_buf(&mut expected_metadata[expected_metadata_moov_offset..]);
+            }
+
+            TestMp4 {
+                data_len: data.len() as u64,
+                data: data.into(),
+                expected_metadata: expected_metadata.into(),
+                mdat,
+                mdat_skipped: 0,
+            }
         }
     }
 
@@ -552,20 +683,17 @@ mod test {
 
         let mut data = vec![];
         let mut metadata = vec![];
-        test_ftyp().put_buf(&mut data);
-        test_ftyp().put_buf(&mut metadata);
+        test_ftyp(ISOM, vec![ISOM]).put_buf(&mut data);
+        test_ftyp(ISOM, vec![ISOM]).put_buf(&mut metadata);
         let mdat = write_test_mdat(&mut data, b"abcdefg");
 
         let moov_pos = data.len();
-        test_moov([]).put_buf(&mut data);
-        test_moov([]).put_buf(&mut metadata);
-        BoxHeader::until_eof(BoxType::MOOV).put_buf(&mut &mut data[moov_pos..]);
+        test_moov().build().put_buf(&mut data);
+        test_moov().build().put_buf(&mut metadata);
+        BoxHeader::until_eof(MOOV).put_buf(&mut &mut data[moov_pos..]);
 
         let sanitized = sanitize(io::Cursor::new(&data)).unwrap();
         assert_eq!(sanitized.data, mdat);
-        // NB: This overly-strict assertion could be weakened. Output metadata doesn't need to match input verbatim, but
-        // we do want to check that chunk offsets were not modified, and that the until-eof-sized moov was modified to
-        // have an explicit size.
         assert_eq!(sanitized.metadata, metadata);
         sanitize(io::Cursor::new(sanitized_data(sanitized, &data))).unwrap();
     }
@@ -574,30 +702,22 @@ mod test {
     fn until_eof_sized_mdat() {
         init_logger();
 
-        let test @ TestMp4 { mdat, .. } = test_mp4().mdat_data(&b"abcdefg"[..]).mdat_data_until_eof().build();
-        let data = test.data.clone();
-        let metadata = test.metadata.clone();
-        let sanitized = sanitize(test).unwrap();
-        assert_eq!(sanitized.data, mdat);
-        // NB: This overly-strict assertion could be weakened. Output metadata doesn't need to match input verbatim, but
-        // we do want to check that chunk offsets were not modified.
-        assert_eq!(sanitized.metadata, metadata);
-        sanitize(io::Cursor::new(sanitized_data(sanitized, &data))).unwrap();
+        let test = test_mp4().mdat_data(&b"abcdefg"[..]).mdat_data_until_eof().build();
+        let sanitized = sanitize(test.clone()).unwrap();
+        assert_eq!(sanitized.data, test.mdat);
+        assert_eq!(sanitized.metadata, test.expected_metadata);
+        sanitize(io::Cursor::new(sanitized_data(sanitized, &test.data))).unwrap();
     }
 
     #[test]
     fn skip() {
         init_logger();
 
-        let test @ TestMp4 { mdat, .. } = test_mp4().mdat_data(&b"abcdefg"[..]).build();
-        let data = test.data.clone();
-        let metadata = test.metadata.clone();
-        let sanitized = sanitize(test).unwrap();
-        assert_eq!(sanitized.data, mdat);
-        // NB: This overly-strict assertion could be weakened. Output metadata doesn't need to match input verbatim, but
-        // we do want to check that chunk offsets were not modified.
-        assert_eq!(sanitized.metadata, metadata);
-        sanitize(io::Cursor::new(sanitized_data(sanitized, &data))).unwrap();
+        let test = test_mp4().mdat_data(&b"abcdefg"[..]).build();
+        let sanitized = sanitize(test.clone()).unwrap();
+        assert_eq!(sanitized.data, test.mdat);
+        assert_eq!(sanitized.metadata, test.expected_metadata);
+        sanitize(io::Cursor::new(sanitized_data(sanitized, &test.data))).unwrap();
     }
 
     #[test]
@@ -605,14 +725,11 @@ mod test {
         init_logger();
 
         let test = test_mp4().mdat_data_len(u64::MAX - 16).build();
-        let test @ TestMp4 { mdat, .. } = test_mp4().mdat_data_len(u64::MAX - test.data.len() as u64).build();
-        let metadata = test.metadata.clone();
-        let sanitized = sanitize(test).unwrap();
-        assert_eq!(sanitized.data, mdat);
+        let test = test_mp4().mdat_data_len(u64::MAX - test.data.len() as u64).build();
+        let sanitized = sanitize(test.clone()).unwrap();
+        assert_eq!(sanitized.data, test.mdat);
         assert_eq!(sanitized.data.offset + sanitized.data.len, u64::MAX);
-        // NB: This overly-strict assertion could be weakened. Output metadata doesn't need to match input verbatim, but
-        // we do want to check that chunk offsets were not modified.
-        assert_eq!(sanitized.metadata, metadata);
+        assert_eq!(sanitized.metadata, test.expected_metadata);
     }
 
     #[test]
@@ -636,12 +753,235 @@ mod test {
     fn mdat_before_moov() {
         init_logger();
 
-        let test = test_mp4().boxes(&[BoxType::MDAT, BoxType::MOOV][..]).build();
-        let data = test.data.clone();
-        let metadata = test.metadata.clone();
-        let sanitized = sanitize(test).unwrap();
-        // This assertion is a crude way, for now, to tell that chunk offsets were adjusted in some way.
-        assert_ne!(sanitized.metadata, metadata);
-        sanitize(io::Cursor::new(sanitized_data(sanitized, &data))).unwrap();
+        let test = test_mp4().boxes(&[FTYP, MDAT, MOOV][..]).build();
+        let sanitized = sanitize(test.clone()).unwrap();
+        assert_eq!(sanitized.metadata, test.expected_metadata);
+        sanitize(io::Cursor::new(sanitized_data(sanitized, &test.data))).unwrap();
+    }
+
+    #[test]
+    fn no_ftyp() {
+        init_logger();
+
+        let test = test_mp4().boxes(&[MOOV, MDAT][..]).build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.current_context(), ParseError::InvalidBoxLayout);
+        });
+    }
+
+    #[test]
+    fn multiple_ftyp() {
+        init_logger();
+
+        let test = test_mp4().boxes(&[FTYP, FTYP, MOOV, MDAT][..]).build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.current_context(), ParseError::InvalidBoxLayout);
+        });
+    }
+
+    #[test]
+    fn ftyp_not_first_box() {
+        init_logger();
+
+        let test = test_mp4().boxes(&[FREE, FREE, FTYP, MOOV, MDAT][..]).build();
+        let sanitized = sanitize(test.clone()).unwrap();
+        assert_eq!(sanitized.data, test.mdat);
+        assert_eq!(sanitized.metadata, test.expected_metadata);
+        sanitize(io::Cursor::new(sanitized_data(sanitized, &test.data))).unwrap();
+    }
+
+    #[test]
+    fn ftyp_not_first_significant_box() {
+        init_logger();
+
+        let test = test_mp4().boxes(&[MOOV, FTYP, MDAT][..]).build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.current_context(), ParseError::InvalidBoxLayout);
+        });
+    }
+
+    #[test]
+    fn no_moov() {
+        init_logger();
+
+        let test = test_mp4().boxes(&[FTYP, MDAT][..]).build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.current_context(), ParseError::MissingRequiredBox(MOOV));
+        });
+    }
+
+    #[test]
+    fn no_mdat() {
+        init_logger();
+
+        let test = test_mp4().boxes(&[FTYP, MOOV][..]).build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.current_context(), ParseError::MissingRequiredBox(MDAT));
+        });
+    }
+
+    #[test]
+    fn free_boxes_in_metadata() {
+        init_logger();
+
+        let test = test_mp4().boxes(&[FTYP, FREE, FREE, MOOV, FREE, MDAT][..]).build();
+        let sanitized = sanitize(test.clone()).unwrap();
+        assert_eq!(sanitized.data, test.mdat);
+        assert_eq!(sanitized.metadata, test.expected_metadata);
+        sanitize(io::Cursor::new(sanitized_data(sanitized, &test.data))).unwrap();
+    }
+
+    #[test]
+    fn free_boxes_after_mdat() {
+        init_logger();
+
+        let test = test_mp4().boxes(&[FTYP, MOOV, MDAT, FREE][..]).build();
+        let sanitized = sanitize(test.clone()).unwrap();
+        assert_eq!(sanitized.data, test.mdat);
+        assert_eq!(sanitized.metadata, test.expected_metadata);
+        sanitize(io::Cursor::new(sanitized_data(sanitized, &test.data))).unwrap();
+    }
+
+    #[test]
+    fn multiple_mdat() {
+        init_logger();
+
+        let test = test_mp4()
+            .boxes(&[FTYP, MOOV, MDAT, FREE, MDAT, MDAT, FREE][..])
+            .build();
+        let sanitized = sanitize(test.clone()).unwrap();
+        assert_eq!(sanitized.data, test.mdat);
+        assert_eq!(sanitized.metadata, test.expected_metadata);
+        sanitize(io::Cursor::new(sanitized_data(sanitized, &test.data))).unwrap();
+    }
+
+    #[test]
+    fn uuid() {
+        init_logger();
+
+        let test = test_mp4().boxes(&[FTYP, MOOV, TEST_UUID, MDAT][..]).build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.current_context(), ParseError::UnsupportedBox(TEST_UUID));
+        });
+    }
+
+    #[test]
+    fn mp41() {
+        init_logger();
+
+        let test = test_mp4().major_brand(MP41).add_compatible_brand(MP41).build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.current_context(), ParseError::UnsupportedFormat(MP41));
+        });
+    }
+
+    #[test]
+    fn mp42() {
+        init_logger();
+
+        let test = test_mp4().major_brand(MP42).compatible_brands(vec![MP42, ISOM]).build();
+        let sanitized = sanitize(test.clone()).unwrap();
+        assert_eq!(sanitized.data, test.mdat);
+        assert_eq!(sanitized.metadata, test.expected_metadata);
+        sanitize(io::Cursor::new(sanitized_data(sanitized, &test.data))).unwrap();
+    }
+
+    #[test]
+    fn no_compatible_brands() {
+        init_logger();
+
+        let test = test_mp4().major_brand(ISOM).compatible_brands(vec![]).build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.current_context(), ParseError::UnsupportedFormat(ISOM));
+        });
+    }
+
+    #[test]
+    fn no_trak() {
+        init_logger();
+
+        let test = test_mp4().moov(test_moov().trak(false).clone()).build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.current_context(), ParseError::MissingRequiredBox(TRAK));
+        });
+    }
+
+    #[test]
+    fn no_mdia() {
+        init_logger();
+
+        let test = test_mp4()
+            .boxes(&[FTYP, MDAT, MOOV][..])
+            .moov(test_moov().mdia(false).clone())
+            .build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.current_context(), ParseError::MissingRequiredBox(MDIA));
+        });
+    }
+
+    #[test]
+    fn no_minf() {
+        init_logger();
+
+        let test = test_mp4()
+            .boxes(&[FTYP, MDAT, MOOV][..])
+            .moov(test_moov().minf(false).clone())
+            .build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.current_context(), ParseError::MissingRequiredBox(MINF));
+        });
+    }
+
+    #[test]
+    fn no_stbl() {
+        init_logger();
+
+        let test = test_mp4()
+            .boxes(&[FTYP, MDAT, MOOV][..])
+            .moov(test_moov().stbl(false).clone())
+            .build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.current_context(), ParseError::MissingRequiredBox(STBL));
+        });
+    }
+
+    #[test]
+    fn no_stco() {
+        init_logger();
+
+        let test = test_mp4()
+            .boxes(&[FTYP, MDAT, MOOV][..])
+            .moov(test_moov().stco(false).clone())
+            .build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.current_context(), ParseError::MissingRequiredBox(STCO | CO64));
+        });
+    }
+
+    #[test]
+    fn co64() {
+        init_logger();
+
+        let test = test_mp4()
+            .boxes(&[FTYP, MDAT, MOOV][..])
+            .moov(test_moov().stco(false).co64(true).clone())
+            .build();
+        let sanitized = sanitize(test.clone()).unwrap();
+        assert_eq!(sanitized.data, test.mdat);
+        assert_eq!(sanitized.metadata, test.expected_metadata);
+        sanitize(io::Cursor::new(sanitized_data(sanitized, &test.data))).unwrap();
+    }
+
+    #[test]
+    fn stco_and_co64() {
+        init_logger();
+
+        let test = test_mp4()
+            .boxes(&[FTYP, MDAT, MOOV][..])
+            .moov(test_moov().co64(true).clone())
+            .build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.current_context(), ParseError::InvalidBoxLayout);
+        });
     }
 }

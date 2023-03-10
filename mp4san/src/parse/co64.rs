@@ -16,6 +16,11 @@ pub struct Co64Entry<'a> {
 const NAME: BoxType = BoxType::CO64;
 
 impl Co64Box {
+    #[cfg(test)]
+    pub(crate) fn with_entries<I: IntoIterator<Item = u64>>(entries: I) -> Self {
+        Self { inner: CoBox::with_entries(entries) }
+    }
+
     pub fn entries_mut(&mut self) -> impl Iterator<Item = Co64Entry<'_>> + ExactSizeIterator + '_ {
         self.inner.entries_mut().map(|inner| Co64Entry { inner })
     }

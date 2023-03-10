@@ -187,6 +187,11 @@ macro_rules! box_type {
         impl BoxType {
             $(pub const $name: Self = Self::FourCC(FourCC::$name);)+
         }
+
+        pub mod box_type {
+            use super::BoxType;
+            $(pub const $name: BoxType = BoxType::$name;)+
+        }
     };
 }
 

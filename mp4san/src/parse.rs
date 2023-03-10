@@ -17,7 +17,7 @@ pub use co64::{Co64Box, Co64Entry};
 pub use error::ParseError;
 pub use fourcc::FourCC;
 pub use ftyp::FtypBox;
-pub use header::{BoxHeader, BoxSize, BoxType, FullBoxHeader};
+pub use header::{box_type, BoxHeader, BoxSize, BoxType, BoxUuid, FullBoxHeader};
 pub use integers::{Mpeg4Int, Mpeg4IntReaderExt, Mpeg4IntWriterExt};
 pub use mdia::MdiaBox;
 pub use minf::MinfBox;
