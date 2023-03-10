@@ -4,6 +4,7 @@ use std::pin::Pin;
 use std::result::Result as StdResult;
 
 use bytes::{Buf, BufMut, BytesMut};
+use derive_more::From;
 use derive_where::derive_where;
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clonable::clonable;
@@ -46,7 +47,7 @@ pub trait ParsedBox: Clone + Debug + Downcast {
     fn put_buf(&self, out: &mut dyn BufMut);
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, From)]
 pub struct Boxes {
     boxes: Vec<AnyMp4Box>,
 }
@@ -122,6 +123,12 @@ impl<T: ParsedBox + ?Sized> Mp4Box<T> {
     }
 }
 
+impl<T: ParsedBox> From<Mp4Box<T>> for AnyMp4Box {
+    fn from(from: Mp4Box<T>) -> Self {
+        Self { parsed_header: from.parsed_header, data: from.data.into() }
+    }
+}
+
 impl<T: ParsedBox + ?Sized> BoxData<T> {
     pub fn get_from_bytes_mut(buf: &mut BytesMut, header: &BoxHeader) -> Result<Self, ParseError> {
         match header.box_data_size()? {
@@ -176,7 +183,11 @@ impl<T: ParsedBox + ?Sized> BoxData<T> {
             *self = Self::Parsed(parsed.into());
         }
         match self {
-            BoxData::Parsed(parsed) => Ok(parsed.as_any_mut().downcast_mut()),
+            BoxData::Parsed(parsed) => {
+                // This is subtle because of the generic T; we have to make sure Downcast::as_any_mut is called on T and
+                // not on Box<T>, or the subsequent Any::downcast_mut::<U>() will fail.
+                Ok(<T>::as_any_mut(parsed).downcast_mut())
+            }
             BoxData::Bytes(_) => unreachable!(),
         }
     }
@@ -192,6 +203,15 @@ impl<T: ParsedBox + ?Sized> BoxData<T> {
         match self {
             BoxData::Bytes(data) => out.put(&data[..]),
             BoxData::Parsed(parsed) => parsed.put_buf(&mut out),
+        }
+    }
+}
+
+impl<T: ParsedBox> From<BoxData<T>> for BoxData<dyn ParsedBox> {
+    fn from(from: BoxData<T>) -> Self {
+        match from {
+            BoxData::Bytes(bytes) => BoxData::Bytes(bytes),
+            BoxData::Parsed(parsed) => BoxData::Parsed(parsed),
         }
     }
 }

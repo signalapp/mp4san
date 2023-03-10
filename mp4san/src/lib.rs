@@ -381,6 +381,7 @@ impl From<Report<ParseError>> for Error {
 mod test {
     use bytes::{Buf, Bytes};
 
+    use crate::parse::{MdiaBox, MinfBox, StblBox, StcoBox, TrakBox};
     use crate::util::test::init_logger;
 
     use super::*;
@@ -390,7 +391,12 @@ mod test {
     }
 
     fn test_moov() -> Mp4Box<MoovBox> {
-        Mp4Box::with_data(MoovBox::empty()).unwrap()
+        let stco = Mp4Box::with_data(StcoBox::with_entries(vec![])).unwrap();
+        let stbl = Mp4Box::with_data(StblBox::with_children(vec![stco.into()])).unwrap();
+        let minf = Mp4Box::with_data(MinfBox::with_children(vec![stbl.into()])).unwrap();
+        let mdia = Mp4Box::with_data(MdiaBox::with_children(vec![minf.into()])).unwrap();
+        let trak = Mp4Box::with_data(TrakBox::with_children(vec![mdia.into()])).unwrap();
+        Mp4Box::with_data(MoovBox::with_children(vec![trak.into()])).unwrap()
     }
 
     fn write_test_mdat(out: &mut Vec<u8>, data: &[u8]) -> InputSpan {

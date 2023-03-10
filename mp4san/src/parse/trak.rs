@@ -13,6 +13,11 @@ pub struct TrakBox {
 const NAME: BoxType = BoxType::TRAK;
 
 impl TrakBox {
+    #[cfg(test)]
+    pub(crate) fn with_children<C: Into<Boxes>>(children: C) -> Self {
+        Self { children: children.into() }
+    }
+
     pub fn mdia_mut(&mut self) -> Result<&mut MdiaBox, ParseError> {
         self.children.get_one_mut().while_parsing_child(NAME, BoxType::MDIA)
     }

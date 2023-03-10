@@ -13,6 +13,11 @@ pub struct MinfBox {
 const NAME: BoxType = BoxType::MINF;
 
 impl MinfBox {
+    #[cfg(test)]
+    pub(crate) fn with_children<C: Into<Boxes>>(children: C) -> Self {
+        Self { children: children.into() }
+    }
+
     pub fn stbl_mut(&mut self) -> Result<&mut StblBox, ParseError> {
         self.children.get_one_mut().while_parsing_child(NAME, BoxType::STBL)
     }

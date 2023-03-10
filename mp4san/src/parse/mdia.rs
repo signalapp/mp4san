@@ -13,6 +13,11 @@ pub struct MdiaBox {
 const NAME: BoxType = BoxType::MDIA;
 
 impl MdiaBox {
+    #[cfg(test)]
+    pub(crate) fn with_children<C: Into<Boxes>>(children: C) -> Self {
+        Self { children: children.into() }
+    }
+
     pub fn minf_mut(&mut self) -> Result<&mut MinfBox, ParseError> {
         self.children.get_one_mut().while_parsing_child(NAME, BoxType::MINF)
     }

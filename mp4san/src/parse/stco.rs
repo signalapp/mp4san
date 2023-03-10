@@ -16,6 +16,11 @@ pub struct StcoEntry<'a> {
 const NAME: BoxType = BoxType::STCO;
 
 impl StcoBox {
+    #[cfg(test)]
+    pub(crate) fn with_entries<I: IntoIterator<Item = u32>>(entries: I) -> Self {
+        Self { inner: CoBox::with_entries(entries) }
+    }
+
     pub fn entries_mut(&mut self) -> impl Iterator<Item = StcoEntry<'_>> + ExactSizeIterator + '_ {
         self.inner.entries_mut().map(|inner| StcoEntry { inner })
     }

@@ -21,6 +21,11 @@ const STCO: BoxType = BoxType::STCO;
 const CO64: BoxType = BoxType::CO64;
 
 impl StblBox {
+    #[cfg(test)]
+    pub(crate) fn with_children<C: Into<Boxes>>(children: C) -> Self {
+        Self { children: children.into() }
+    }
+
     pub fn co_mut(&mut self) -> Result<StblCoMut<'_>, ParseError> {
         let have_stco = self.children.box_types().any(|box_type| box_type == STCO);
         let have_co64 = self.children.box_types().any(|box_type| box_type == CO64);

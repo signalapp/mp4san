@@ -22,6 +22,18 @@ pub struct CoEntry<'a, T> {
 impl<T> CoBox<T> {
     const FULL_BOX_HEADER: FullBoxHeader = FullBoxHeader::default();
 
+    #[cfg(test)]
+    pub(crate) fn with_entries<I: IntoIterator<Item = T>>(entries: I) -> Self
+    where
+        T: Mpeg4Int,
+    {
+        let mut entries_bytes = BytesMut::new();
+        for entry in entries {
+            entry.put_buf(&mut entries_bytes);
+        }
+        Self { entries: entries_bytes, _t: PhantomData }
+    }
+
     pub fn parse(mut buf: &mut BytesMut, name: BoxType) -> Result<Self, ParseError> {
         FullBoxHeader::parse(&mut buf)?.ensure_eq(&Self::FULL_BOX_HEADER)?;
 
