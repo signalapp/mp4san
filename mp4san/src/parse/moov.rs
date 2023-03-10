@@ -61,7 +61,7 @@ mod test {
     use super::*;
 
     fn test_trak() -> Mp4Box<TrakBox> {
-        Mp4Box::with_data(TrakBox::with_children(vec![])).unwrap()
+        Mp4Box::with_data(TrakBox::with_children(vec![]).into()).unwrap()
     }
 
     #[test]

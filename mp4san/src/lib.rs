@@ -184,12 +184,17 @@ pub async fn sanitize_async<R: AsyncRead + AsyncSkip>(input: R) -> Result<Saniti
     if !ftyp_data.compatible_brands().any(|b| b == COMPATIBLE_BRAND) {
         return Err(report!(ParseError::UnsupportedFormat(ftyp_data.major_brand)).into());
     };
-    let Some(mut moov) = moov else {
+    let Some(moov) = moov else {
         return Err(report!(ParseError::MissingRequiredBox(BoxType::MOOV)).into());
     };
     let Some(data) = data else {
         return Err(report!(ParseError::MissingRequiredBox(BoxType::MDAT)).into());
     };
+
+    // Make sure none of the metadata boxes use BoxSize::UntilEof, as we want the caller to be able to concatenate movie
+    // data to the end of the metadata.
+    let ftyp = Mp4Box::with_data(ftyp.data)?;
+    let mut moov = Mp4Box::with_data(moov.data)?;
 
     // Add a free box to pad, if one will fit, if the mdat box would move backward. If one won't fit, or if the mdat box
     // would move forward, adjust mdat offsets in stco/co64 the amount it was displaced.
@@ -387,16 +392,16 @@ mod test {
     use super::*;
 
     fn test_ftyp() -> Mp4Box<FtypBox> {
-        Mp4Box::with_data(FtypBox::new(COMPATIBLE_BRAND, 0, [COMPATIBLE_BRAND])).unwrap()
+        Mp4Box::with_data(FtypBox::new(COMPATIBLE_BRAND, 0, [COMPATIBLE_BRAND]).into()).unwrap()
     }
 
     fn test_moov() -> Mp4Box<MoovBox> {
-        let stco = Mp4Box::with_data(StcoBox::with_entries(vec![])).unwrap();
-        let stbl = Mp4Box::with_data(StblBox::with_children(vec![stco.into()])).unwrap();
-        let minf = Mp4Box::with_data(MinfBox::with_children(vec![stbl.into()])).unwrap();
-        let mdia = Mp4Box::with_data(MdiaBox::with_children(vec![minf.into()])).unwrap();
-        let trak = Mp4Box::with_data(TrakBox::with_children(vec![mdia.into()])).unwrap();
-        Mp4Box::with_data(MoovBox::with_children(vec![trak.into()])).unwrap()
+        let stco = Mp4Box::with_data(StcoBox::with_entries(vec![]).into()).unwrap();
+        let stbl = Mp4Box::with_data(StblBox::with_children(vec![stco.into()]).into()).unwrap();
+        let minf = Mp4Box::with_data(MinfBox::with_children(vec![stbl.into()]).into()).unwrap();
+        let mdia = Mp4Box::with_data(MdiaBox::with_children(vec![minf.into()]).into()).unwrap();
+        let trak = Mp4Box::with_data(TrakBox::with_children(vec![mdia.into()]).into()).unwrap();
+        Mp4Box::with_data(MoovBox::with_children(vec![trak.into()]).into()).unwrap()
     }
 
     fn write_test_mdat(out: &mut Vec<u8>, data: &[u8]) -> InputSpan {
@@ -414,6 +419,11 @@ mod test {
         };
         header.put_buf(&mut *out);
         InputSpan { offset, len: out.len() as u64 - offset }
+    }
+
+    fn sanitized_data(sanitized: SanitizedMetadata, data: &[u8]) -> Vec<u8> {
+        let mdat = &data[sanitized.data.offset as usize..][..sanitized.data.len as usize];
+        [&sanitized.metadata[..], mdat].concat()
     }
 
     struct TestMp4 {
@@ -496,6 +506,7 @@ mod test {
 
         let sanitized = sanitize(io::Cursor::new(&data)).unwrap();
         assert_eq!(sanitized.data, mdat);
+        sanitize(io::Cursor::new(sanitized_data(sanitized, &data))).unwrap();
     }
 
     #[test]
@@ -503,8 +514,10 @@ mod test {
         init_logger();
 
         let test @ TestMp4 { mdat, .. } = TestMp4::with_mdat_data_len(b"abcdefg", None);
+        let data = test.data.clone();
         let sanitized = sanitize(test).unwrap();
         assert_eq!(sanitized.data, mdat);
+        sanitize(io::Cursor::new(sanitized_data(sanitized, &data))).unwrap();
     }
 
     #[test]
@@ -512,8 +525,10 @@ mod test {
         init_logger();
 
         let test @ TestMp4 { mdat, .. } = TestMp4::new(b"abcdefg");
+        let data = test.data.clone();
         let sanitized = sanitize(test).unwrap();
         assert_eq!(sanitized.data, mdat);
+        sanitize(io::Cursor::new(sanitized_data(sanitized, &data))).unwrap();
     }
 
     #[test]

@@ -27,7 +27,7 @@ pub struct Mp4Box<T: ?Sized> {
 
 pub type AnyMp4Box = Mp4Box<dyn ParsedBox>;
 
-#[derive(Debug)]
+#[derive(Debug, From)]
 #[derive_where(Clone; Box<T>)]
 pub enum BoxData<T: ?Sized> {
     Bytes(BytesMut),
@@ -53,12 +53,12 @@ pub struct Boxes {
 }
 
 impl<T: ParsedBox + ?Sized> Mp4Box<T> {
-    pub fn with_data(data: T) -> Result<Self, ParseError>
+    pub fn with_data(data: BoxData<T>) -> Result<Self, ParseError>
     where
         T: ParseBox,
     {
         let parsed_header = BoxHeader::with_data_size(T::box_type(), data.encoded_len())?;
-        Ok(Self { parsed_header, data: BoxData::Parsed(Box::new(data)) })
+        Ok(Self { parsed_header, data })
     }
 
     pub fn parse(mut buf: &mut BytesMut) -> Result<Self, ParseError> {
@@ -128,6 +128,10 @@ impl<T: ParsedBox> From<Mp4Box<T>> for AnyMp4Box {
         Self { parsed_header: from.parsed_header, data: from.data.into() }
     }
 }
+
+//
+// BoxData impls
+//
 
 impl<T: ParsedBox + ?Sized> BoxData<T> {
     pub fn get_from_bytes_mut(buf: &mut BytesMut, header: &BoxHeader) -> Result<Self, ParseError> {
@@ -213,6 +217,12 @@ impl<T: ParsedBox> From<BoxData<T>> for BoxData<dyn ParsedBox> {
             BoxData::Bytes(bytes) => BoxData::Bytes(bytes),
             BoxData::Parsed(parsed) => BoxData::Parsed(parsed),
         }
+    }
+}
+
+impl<T: ParsedBox + Sized> From<T> for BoxData<T> {
+    fn from(from: T) -> Self {
+        BoxData::Parsed(Box::new(from))
     }
 }
 
