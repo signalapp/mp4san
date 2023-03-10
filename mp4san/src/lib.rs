@@ -203,8 +203,13 @@ pub async fn sanitize_async<R: AsyncRead + AsyncSkip>(input: R) -> Result<Saniti
     const PAD_HEADER_SIZE: u64 = BoxHeader::with_u32_data_size(BoxType::FREE, 0).encoded_len();
     const MAX_PAD_SIZE: u64 = u32::MAX as u64 - PAD_HEADER_SIZE;
     match data.offset.checked_sub(metadata_len) {
-        Some(0) => (),
-        Some(size @ PAD_HEADER_SIZE..=MAX_PAD_SIZE) => pad_size = size,
+        Some(0) => {
+            log::info!("metadata: 0x{metadata_len:08x} bytes");
+        }
+        Some(size @ PAD_HEADER_SIZE..=MAX_PAD_SIZE) => {
+            pad_size = size;
+            log::info!("metadata: 0x{metadata_len:08x} bytes; adding padding of 0x{pad_size:08x} bytes");
+        }
         mdat_backward_displacement => {
             let mdat_displacement = match mdat_backward_displacement {
                 Some(mdat_backward_displacement) => {
@@ -214,6 +219,8 @@ pub async fn sanitize_async<R: AsyncRead + AsyncSkip>(input: R) -> Result<Saniti
             };
             let mdat_displacement: i32 = mdat_displacement
                 .ok_or_else(|| report_attach!(ParseError::UnsupportedBoxLayout, "mdat displaced too far"))?;
+
+            log::info!("metadata: 0x{metadata_len:08x} bytes; displacing chunk offsets by 0x{mdat_displacement:08x}");
 
             for trak in &mut moov.data.parse()?.traks() {
                 let co = trak?.mdia_mut()?.minf_mut()?.stbl_mut()?.co_mut()?;
@@ -385,6 +392,7 @@ impl From<Report<ParseError>> for Error {
 #[cfg(test)]
 mod test {
     use bytes::{Buf, Bytes};
+    use derive_builder::Builder;
 
     use crate::parse::{MdiaBox, MinfBox, StblBox, StcoBox, TrakBox};
     use crate::util::test::init_logger;
@@ -395,13 +403,17 @@ mod test {
         Mp4Box::with_data(FtypBox::new(COMPATIBLE_BRAND, 0, [COMPATIBLE_BRAND]).into()).unwrap()
     }
 
-    fn test_moov() -> Mp4Box<MoovBox> {
-        let stco = Mp4Box::with_data(StcoBox::with_entries(vec![]).into()).unwrap();
+    fn test_moov<I: IntoIterator<Item = u32>>(entries: I) -> Mp4Box<MoovBox> {
+        let stco = Mp4Box::with_data(StcoBox::with_entries(entries).into()).unwrap();
         let stbl = Mp4Box::with_data(StblBox::with_children(vec![stco.into()]).into()).unwrap();
         let minf = Mp4Box::with_data(MinfBox::with_children(vec![stbl.into()]).into()).unwrap();
         let mdia = Mp4Box::with_data(MdiaBox::with_children(vec![minf.into()]).into()).unwrap();
         let trak = Mp4Box::with_data(TrakBox::with_children(vec![mdia.into()]).into()).unwrap();
         Mp4Box::with_data(MoovBox::with_children(vec![trak.into()]).into()).unwrap()
+    }
+
+    fn test_mp4() -> TestMp4Builder {
+        Default::default()
     }
 
     fn write_test_mdat(out: &mut Vec<u8>, data: &[u8]) -> InputSpan {
@@ -426,34 +438,76 @@ mod test {
         [&sanitized.metadata[..], mdat].concat()
     }
 
+    #[derive(Builder)]
+    #[builder(name = "TestMp4Builder", build_fn(name = "build_spec"))]
+    struct TestMp4Spec {
+        #[builder(default)]
+        #[builder(setter(into, each(name = "add_mdat_data", into)))]
+        mdat_data: Vec<u8>,
+
+        #[builder(default = "Some(self.mdat_data.as_deref().unwrap_or_default().len() as u64)")]
+        #[builder(setter(strip_option))]
+        mdat_data_len: Option<u64>,
+
+        #[builder(default = "vec![BoxType::MOOV, BoxType::MDAT]")]
+        #[builder(setter(into, each(name = "add_box")))]
+        boxes: Vec<BoxType>,
+    }
+
+    #[derive(Clone)]
     struct TestMp4 {
         data: Bytes,
         data_len: u64,
+        metadata: Bytes,
         mdat: InputSpan,
         mdat_skipped: u64,
     }
 
-    impl TestMp4 {
-        fn new(mdat_data: &[u8]) -> Self {
-            let mut data = vec![];
-            test_ftyp().put_buf(&mut data);
-            test_moov().put_buf(&mut data);
-            let mdat = write_test_mdat(&mut data, mdat_data);
-            Self { data_len: data.len() as u64, data: data.into(), mdat, mdat_skipped: 0 }
+    impl TestMp4Builder {
+        fn mdat_data_until_eof(&mut self) -> &mut Self {
+            self.mdat_data_len = Some(None);
+            self
         }
 
-        fn with_mdat_data_len(mdat_data: &[u8], mdat_data_len: Option<u64>) -> Self {
+        fn build(&self) -> TestMp4 {
+            let spec = self.build_spec().unwrap();
+
             let mut data = vec![];
             test_ftyp().put_buf(&mut data);
-            test_moov().put_buf(&mut data);
-            let mut mdat = write_mdat_header(&mut data, mdat_data_len);
-            data.extend_from_slice(&mdat_data);
-            if let Some(mdat_data_len) = mdat_data_len {
-                mdat.len = mdat.len.saturating_add(mdat_data_len);
-            } else {
-                mdat.len += mdat_data.len() as u64;
+
+            let mut mdat = None;
+            let mut moovs = Vec::new();
+            let mut stco_entries = [0];
+            for box_type in &spec.boxes {
+                match *box_type {
+                    BoxType::MOOV => {
+                        moovs.push(data.len());
+                        test_moov(stco_entries).put_buf(&mut data);
+                    }
+                    BoxType::MDAT => {
+                        let written_mdat = write_mdat_header(&mut data, spec.mdat_data_len);
+                        data.extend_from_slice(&spec.mdat_data);
+
+                        let mdat_data_len = spec.mdat_data_len.unwrap_or(spec.mdat_data.len() as u64);
+                        mdat = Some(InputSpan { len: written_mdat.len.saturating_add(mdat_data_len), ..written_mdat });
+                    }
+                    _ => panic!("invalid box type for test {box_type}"),
+                }
             }
-            Self { data_len: data.len() as u64, data: data.into(), mdat, mdat_skipped: 0 }
+
+            let mdat = mdat.unwrap();
+            for stco_entry in &mut stco_entries {
+                *stco_entry += mdat.offset as u32;
+            }
+
+            let mut metadata = vec![];
+            test_ftyp().put_buf(&mut metadata);
+            for moov in moovs {
+                test_moov(stco_entries).put_buf(&mut data[moov..]);
+                test_moov(stco_entries).put_buf(&mut metadata);
+            }
+
+            TestMp4 { data_len: data.len() as u64, data: data.into(), metadata: metadata.into(), mdat, mdat_skipped: 0 }
         }
     }
 
@@ -493,30 +547,41 @@ mod test {
     }
 
     #[test]
-    fn zero_size_moov() {
+    fn until_eof_sized_moov() {
         init_logger();
 
         let mut data = vec![];
+        let mut metadata = vec![];
         test_ftyp().put_buf(&mut data);
+        test_ftyp().put_buf(&mut metadata);
         let mdat = write_test_mdat(&mut data, b"abcdefg");
 
         let moov_pos = data.len();
-        test_moov().put_buf(&mut data);
+        test_moov([]).put_buf(&mut data);
+        test_moov([]).put_buf(&mut metadata);
         BoxHeader::until_eof(BoxType::MOOV).put_buf(&mut &mut data[moov_pos..]);
 
         let sanitized = sanitize(io::Cursor::new(&data)).unwrap();
         assert_eq!(sanitized.data, mdat);
+        // NB: This overly-strict assertion could be weakened. Output metadata doesn't need to match input verbatim, but
+        // we do want to check that chunk offsets were not modified, and that the until-eof-sized moov was modified to
+        // have an explicit size.
+        assert_eq!(sanitized.metadata, metadata);
         sanitize(io::Cursor::new(sanitized_data(sanitized, &data))).unwrap();
     }
 
     #[test]
-    fn zero_size_mdat() {
+    fn until_eof_sized_mdat() {
         init_logger();
 
-        let test @ TestMp4 { mdat, .. } = TestMp4::with_mdat_data_len(b"abcdefg", None);
+        let test @ TestMp4 { mdat, .. } = test_mp4().mdat_data(&b"abcdefg"[..]).mdat_data_until_eof().build();
         let data = test.data.clone();
+        let metadata = test.metadata.clone();
         let sanitized = sanitize(test).unwrap();
         assert_eq!(sanitized.data, mdat);
+        // NB: This overly-strict assertion could be weakened. Output metadata doesn't need to match input verbatim, but
+        // we do want to check that chunk offsets were not modified.
+        assert_eq!(sanitized.metadata, metadata);
         sanitize(io::Cursor::new(sanitized_data(sanitized, &data))).unwrap();
     }
 
@@ -524,10 +589,14 @@ mod test {
     fn skip() {
         init_logger();
 
-        let test @ TestMp4 { mdat, .. } = TestMp4::new(b"abcdefg");
+        let test @ TestMp4 { mdat, .. } = test_mp4().mdat_data(&b"abcdefg"[..]).build();
         let data = test.data.clone();
+        let metadata = test.metadata.clone();
         let sanitized = sanitize(test).unwrap();
         assert_eq!(sanitized.data, mdat);
+        // NB: This overly-strict assertion could be weakened. Output metadata doesn't need to match input verbatim, but
+        // we do want to check that chunk offsets were not modified.
+        assert_eq!(sanitized.metadata, metadata);
         sanitize(io::Cursor::new(sanitized_data(sanitized, &data))).unwrap();
     }
 
@@ -535,19 +604,23 @@ mod test {
     fn max_input_length() {
         init_logger();
 
-        let test = TestMp4::with_mdat_data_len(b"", Some(u64::MAX - 16));
-        let test @ TestMp4 { mdat, .. } = TestMp4::with_mdat_data_len(b"", Some(u64::MAX - test.data.len() as u64));
+        let test = test_mp4().mdat_data_len(u64::MAX - 16).build();
+        let test @ TestMp4 { mdat, .. } = test_mp4().mdat_data_len(u64::MAX - test.data.len() as u64).build();
+        let metadata = test.metadata.clone();
         let sanitized = sanitize(test).unwrap();
         assert_eq!(sanitized.data, mdat);
         assert_eq!(sanitized.data.offset + sanitized.data.len, u64::MAX);
+        // NB: This overly-strict assertion could be weakened. Output metadata doesn't need to match input verbatim, but
+        // we do want to check that chunk offsets were not modified.
+        assert_eq!(sanitized.metadata, metadata);
     }
 
     #[test]
     fn input_length_overflow() {
         init_logger();
 
-        let test = TestMp4::with_mdat_data_len(b"", Some(u64::MAX - 16));
-        let test = TestMp4::with_mdat_data_len(b"", Some(u64::MAX - test.data.len() as u64 + 1));
+        let test = test_mp4().mdat_data_len(u64::MAX - 16).build();
+        let test = test_mp4().mdat_data_len(u64::MAX - test.data.len() as u64 + 1).build();
         sanitize(test).unwrap_err();
     }
 
@@ -555,7 +628,20 @@ mod test {
     fn box_size_overflow() {
         init_logger();
 
-        let test = TestMp4::with_mdat_data_len(b"", Some(u64::MAX - 16));
+        let test = test_mp4().mdat_data_len(u64::MAX - 16).build();
         sanitize(test).unwrap_err();
+    }
+
+    #[test]
+    fn mdat_before_moov() {
+        init_logger();
+
+        let test = test_mp4().boxes(&[BoxType::MDAT, BoxType::MOOV][..]).build();
+        let data = test.data.clone();
+        let metadata = test.metadata.clone();
+        let sanitized = sanitize(test).unwrap();
+        // This assertion is a crude way, for now, to tell that chunk offsets were adjusted in some way.
+        assert_ne!(sanitized.metadata, metadata);
+        sanitize(io::Cursor::new(sanitized_data(sanitized, &data))).unwrap();
     }
 }
