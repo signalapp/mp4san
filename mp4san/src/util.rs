@@ -1,3 +1,6 @@
+#[cfg(test)]
+pub mod test;
+
 use std::io;
 
 /// Checked addition with a signed integer. Computes `lhs + rhs`, returning `None` if overflow occurred.
@@ -51,17 +54,5 @@ impl<T> IoResultExt for Result<T, io::Error> {
             Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => Err(map(err)),
             Err(err) => Err(err.into()),
         }
-    }
-}
-
-#[cfg(test)]
-pub mod test {
-    pub fn init_logger() {
-        // Ignore errors initializing the logger if tests race to configure it
-        let _ignore = env_logger::builder()
-            .filter_level(log::LevelFilter::Info)
-            .parse_default_env()
-            .is_test(true)
-            .try_init();
     }
 }

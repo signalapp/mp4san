@@ -391,291 +391,14 @@ impl From<Report<ParseError>> for Error {
 
 #[cfg(test)]
 mod test {
-    use std::iter;
-
     use assert_matches::assert_matches;
-    use bytes::{Buf, Bytes};
-    use derive_builder::Builder;
 
-    use crate::parse::box_type::*;
-    use crate::parse::{BoxUuid, Co64Box, MdiaBox, MinfBox, StblBox, StcoBox, TrakBox};
-    use crate::util::test::init_logger;
+    use crate::parse::box_type::{CO64, FREE, FTYP, MDAT, MDIA, MINF, MOOV, STBL, STCO, TRAK};
+    use crate::util::test::{
+        init_logger, sanitized_data, test_ftyp, test_moov, test_mp4, write_test_mdat, ISOM, MP41, MP42, TEST_UUID,
+    };
 
     use super::*;
-
-    const TEST_UUID: BoxType = BoxType::Uuid(BoxUuid(*b"thisisatestuuid!"));
-    const MP42: FourCC = FourCC { value: *b"mp42" };
-    const MP41: FourCC = FourCC { value: *b"mp41" };
-    const ISOM: FourCC = FourCC { value: *b"isom" };
-
-    fn test_ftyp(major_brand: FourCC, compatible_brands: Vec<FourCC>) -> Mp4Box<FtypBox> {
-        Mp4Box::with_data(FtypBox::new(major_brand, 0, compatible_brands).into()).unwrap()
-    }
-
-    fn test_moov() -> TestMoovBuilder {
-        Default::default()
-    }
-
-    #[derive(Builder)]
-    #[builder(name = "TestMoovBuilder", build_fn(name = "build_spec"))]
-    struct TestMoovSpec {
-        #[builder(default)]
-        #[builder(setter(into))]
-        co_entries: Vec<u64>,
-
-        #[builder(default = "true")]
-        stco: bool,
-
-        #[builder(default)]
-        co64: bool,
-
-        #[builder(default = "true")]
-        stbl: bool,
-
-        #[builder(default = "true")]
-        minf: bool,
-
-        #[builder(default = "true")]
-        mdia: bool,
-
-        #[builder(default = "true")]
-        trak: bool,
-    }
-
-    impl TestMoovBuilder {
-        fn build(&self) -> Mp4Box<MoovBox> {
-            let spec = self.build_spec().unwrap();
-
-            let mut co = vec![];
-            if spec.co64 {
-                let entries = spec.co_entries.iter().cloned();
-                co.push(Mp4Box::with_data(Co64Box::with_entries(entries).into()).unwrap().into());
-            }
-            if spec.stco {
-                let entries = spec.co_entries.into_iter().map(|entry| entry as u32);
-                co.push(Mp4Box::with_data(StcoBox::with_entries(entries).into()).unwrap().into());
-            }
-            let stbl = match spec.stbl {
-                true => vec![Mp4Box::with_data(StblBox::with_children(co).into()).unwrap().into()],
-                false => vec![],
-            };
-            let minf = match spec.minf {
-                true => vec![Mp4Box::with_data(MinfBox::with_children(stbl).into()).unwrap().into()],
-                false => vec![],
-            };
-            let mdia = match spec.mdia {
-                true => vec![Mp4Box::with_data(MdiaBox::with_children(minf).into()).unwrap().into()],
-                false => vec![],
-            };
-            let trak = match spec.trak {
-                true => vec![Mp4Box::with_data(TrakBox::with_children(mdia).into()).unwrap().into()],
-                false => vec![],
-            };
-            Mp4Box::with_data(MoovBox::with_children(trak).into()).unwrap()
-        }
-    }
-
-    fn test_mp4() -> TestMp4Builder {
-        Default::default()
-    }
-
-    fn write_test_mdat(out: &mut Vec<u8>, data: &[u8]) -> InputSpan {
-        let mut span = write_mdat_header(out, Some(data.len() as u64));
-        out.extend_from_slice(data);
-        span.len += data.len() as u64;
-        span
-    }
-
-    fn write_mdat_header(out: &mut Vec<u8>, data_len: Option<u64>) -> InputSpan {
-        let offset = out.len() as u64;
-        let header = match data_len {
-            Some(data_len) => BoxHeader::with_data_size(MDAT, data_len).unwrap(),
-            None => BoxHeader::until_eof(MDAT),
-        };
-        header.put_buf(&mut *out);
-        InputSpan { offset, len: out.len() as u64 - offset }
-    }
-
-    fn write_test_free(mut out: &mut Vec<u8>, len: u32) {
-        const FREE_HEADER_SIZE: u32 = BoxHeader::with_u32_data_size(FREE, 0).encoded_len() as u32;
-        BoxHeader::with_u32_data_size(FREE, len - FREE_HEADER_SIZE).put_buf(&mut out);
-        out.extend(iter::repeat(0).take((len - FREE_HEADER_SIZE) as usize));
-    }
-
-    fn write_test_uuid(out: &mut Vec<u8>) {
-        BoxHeader::with_u32_data_size(TEST_UUID, 0).put_buf(out);
-    }
-
-    fn sanitized_data(sanitized: SanitizedMetadata, data: &[u8]) -> Vec<u8> {
-        let mdat = &data[sanitized.data.offset as usize..][..sanitized.data.len as usize];
-        [&sanitized.metadata[..], mdat].concat()
-    }
-
-    #[derive(Builder)]
-    #[builder(name = "TestMp4Builder", build_fn(name = "build_spec"))]
-    struct TestMp4Spec {
-        #[builder(default = "ISOM")]
-        major_brand: FourCC,
-
-        #[builder(default = "vec![ISOM]")]
-        #[builder(setter(into, each(name = "add_compatible_brand")))]
-        compatible_brands: Vec<FourCC>,
-
-        #[builder(default)]
-        moov: TestMoovBuilder,
-
-        #[builder(default)]
-        #[builder(setter(into, each(name = "add_mdat_data", into)))]
-        mdat_data: Vec<u8>,
-
-        #[builder(default = "Some(self.mdat_data.as_deref().unwrap_or_default().len() as u64)")]
-        #[builder(setter(strip_option))]
-        mdat_data_len: Option<u64>,
-
-        #[builder(default = "vec![FTYP, MOOV, MDAT]")]
-        #[builder(setter(into, each(name = "add_box")))]
-        boxes: Vec<BoxType>,
-    }
-
-    #[derive(Clone)]
-    struct TestMp4 {
-        data: Bytes,
-        data_len: u64,
-        expected_metadata: Bytes,
-        mdat: InputSpan,
-        mdat_skipped: u64,
-    }
-
-    impl TestMp4Builder {
-        fn mdat_data_until_eof(&mut self) -> &mut Self {
-            self.mdat_data_len = Some(None);
-            self
-        }
-
-        fn build(&self) -> TestMp4 {
-            let spec = self.build_spec().unwrap();
-            let mut moov = spec.moov;
-            moov.co_entries(vec![0]);
-
-            let mut data = vec![];
-            let mut mdat: Option<InputSpan> = None;
-            let mut moov_offsets = Vec::new();
-            let mut metadata_free_len = 0;
-            for box_type in &spec.boxes {
-                match *box_type {
-                    FTYP => {
-                        test_ftyp(spec.major_brand, spec.compatible_brands.clone()).put_buf(&mut data);
-                    }
-                    MOOV => {
-                        moov_offsets.push(data.len());
-                        moov.build().put_buf(&mut data);
-                    }
-                    MDAT => {
-                        let written_mdat = write_mdat_header(&mut data, spec.mdat_data_len);
-                        data.extend_from_slice(&spec.mdat_data);
-
-                        let mdat_data_len = spec.mdat_data_len.unwrap_or(spec.mdat_data.len() as u64);
-                        let mdat_len = written_mdat.len.saturating_add(mdat_data_len);
-                        match &mut mdat {
-                            Some(mdat) => mdat.len += mdat_len,
-                            None => mdat = Some(InputSpan { len: mdat_len, ..written_mdat }),
-                        }
-                    }
-                    FREE => {
-                        let free_len = 13;
-                        write_test_free(&mut data, free_len);
-                        match &mut mdat {
-                            Some(mdat) => mdat.len += free_len as u64,
-                            None => metadata_free_len += free_len,
-                        }
-                    }
-                    TEST_UUID => {
-                        write_test_uuid(&mut data);
-                    }
-                    _ => panic!("invalid box type for test {box_type}"),
-                }
-            }
-
-            let mdat = mdat.unwrap_or(InputSpan { offset: data.len() as u64, len: 0 });
-
-            // Calculate and write correct chunk offsets
-            let mut co_entries = moov.build_spec().unwrap().co_entries;
-            for co_entry in &mut co_entries {
-                *co_entry += mdat.offset;
-            }
-            for moov_offset in &moov_offsets {
-                let moov = moov.co_entries(co_entries.clone()).build();
-                moov.put_buf(&mut data[*moov_offset..]);
-            }
-
-            // Calculate expected output metadata. NB: The expectation that the output metadata matches the input
-            // metadata verbatim is overly-strict and could be weakened.
-            let mut expected_metadata = vec![];
-            test_ftyp(spec.major_brand, spec.compatible_brands).put_buf(&mut expected_metadata);
-            let mut expected_metadata_moov_offsets = Vec::new();
-            for _ in moov_offsets {
-                expected_metadata_moov_offsets.push(expected_metadata.len());
-                let moov = moov.co_entries(co_entries.clone()).build();
-                moov.put_buf(&mut expected_metadata);
-            }
-            if metadata_free_len != 0 {
-                write_test_free(&mut expected_metadata, metadata_free_len);
-            }
-
-            // Calculate and write correct expected output chunk offsets
-            for co_entry in &mut co_entries {
-                *co_entry -= mdat.offset;
-                *co_entry += expected_metadata.len() as u64;
-            }
-            for expected_metadata_moov_offset in expected_metadata_moov_offsets {
-                let moov = moov.co_entries(co_entries.clone()).build();
-                moov.put_buf(&mut expected_metadata[expected_metadata_moov_offset..]);
-            }
-
-            TestMp4 {
-                data_len: data.len() as u64,
-                data: data.into(),
-                expected_metadata: expected_metadata.into(),
-                mdat,
-                mdat_skipped: 0,
-            }
-        }
-    }
-
-    impl Read for TestMp4 {
-        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            (&mut self.data).reader().read(buf)
-        }
-    }
-
-    impl Skip for TestMp4 {
-        fn skip(&mut self, amount: u64) -> io::Result<()> {
-            let advance_amount = self.data.len().min(amount as usize);
-            self.data.advance(advance_amount);
-
-            let skip_amount = amount.saturating_sub(advance_amount as u64);
-            let mdat_end = self.mdat.offset.saturating_add(self.mdat.len);
-            let mdat_skip_max = mdat_end.saturating_sub(self.data_len);
-            match self.mdat_skipped.checked_add(skip_amount) {
-                Some(mdat_skipped) if mdat_skipped <= mdat_skip_max => {
-                    self.mdat_skipped = mdat_skipped;
-                    Ok(())
-                }
-                _ => Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "test skipped past u64 limit",
-                )),
-            }
-        }
-
-        fn stream_position(&mut self) -> io::Result<u64> {
-            Ok(self.data_len - self.data.len() as u64 + self.mdat_skipped)
-        }
-
-        fn stream_len(&mut self) -> io::Result<u64> {
-            Ok(self.data_len.max(self.mdat.offset + self.mdat.len))
-        }
-    }
 
     #[test]
     fn until_eof_sized_moov() {
@@ -683,8 +406,8 @@ mod test {
 
         let mut data = vec![];
         let mut metadata = vec![];
-        test_ftyp(ISOM, vec![ISOM]).put_buf(&mut data);
-        test_ftyp(ISOM, vec![ISOM]).put_buf(&mut metadata);
+        test_ftyp().build().put_buf(&mut data);
+        test_ftyp().build().put_buf(&mut metadata);
         let mdat = write_test_mdat(&mut data, b"abcdefg");
 
         let moov_pos = data.len();
@@ -700,30 +423,17 @@ mod test {
 
     #[test]
     fn until_eof_sized_mdat() {
-        init_logger();
-
         let test = test_mp4().mdat_data(&b"abcdefg"[..]).mdat_data_until_eof().build();
-        let sanitized = sanitize(test.clone()).unwrap();
-        assert_eq!(sanitized.data, test.mdat);
-        assert_eq!(sanitized.metadata, test.expected_metadata);
-        sanitize(io::Cursor::new(sanitized_data(sanitized, &test.data))).unwrap();
+        test.sanitize_ok();
     }
 
     #[test]
     fn skip() {
-        init_logger();
-
-        let test = test_mp4().mdat_data(&b"abcdefg"[..]).build();
-        let sanitized = sanitize(test.clone()).unwrap();
-        assert_eq!(sanitized.data, test.mdat);
-        assert_eq!(sanitized.metadata, test.expected_metadata);
-        sanitize(io::Cursor::new(sanitized_data(sanitized, &test.data))).unwrap();
+        test_mp4().mdat_data(&b"abcdefg"[..]).build().sanitize_ok();
     }
 
     #[test]
     fn max_input_length() {
-        init_logger();
-
         let test = test_mp4().mdat_data_len(u64::MAX - 16).build();
         let test = test_mp4().mdat_data_len(u64::MAX - test.data.len() as u64).build();
         let sanitized = sanitize(test.clone()).unwrap();
@@ -734,8 +444,6 @@ mod test {
 
     #[test]
     fn input_length_overflow() {
-        init_logger();
-
         let test = test_mp4().mdat_data_len(u64::MAX - 16).build();
         let test = test_mp4().mdat_data_len(u64::MAX - test.data.len() as u64 + 1).build();
         sanitize(test).unwrap_err();
@@ -743,26 +451,17 @@ mod test {
 
     #[test]
     fn box_size_overflow() {
-        init_logger();
-
         let test = test_mp4().mdat_data_len(u64::MAX - 16).build();
         sanitize(test).unwrap_err();
     }
 
     #[test]
     fn mdat_before_moov() {
-        init_logger();
-
-        let test = test_mp4().boxes(&[FTYP, MDAT, MOOV][..]).build();
-        let sanitized = sanitize(test.clone()).unwrap();
-        assert_eq!(sanitized.metadata, test.expected_metadata);
-        sanitize(io::Cursor::new(sanitized_data(sanitized, &test.data))).unwrap();
+        test_mp4().boxes(&[FTYP, MDAT, MOOV][..]).build().sanitize_ok();
     }
 
     #[test]
     fn no_ftyp() {
-        init_logger();
-
         let test = test_mp4().boxes(&[MOOV, MDAT][..]).build();
         assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
             assert_matches!(err.current_context(), ParseError::InvalidBoxLayout);
@@ -771,8 +470,6 @@ mod test {
 
     #[test]
     fn multiple_ftyp() {
-        init_logger();
-
         let test = test_mp4().boxes(&[FTYP, FTYP, MOOV, MDAT][..]).build();
         assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
             assert_matches!(err.current_context(), ParseError::InvalidBoxLayout);
@@ -781,19 +478,12 @@ mod test {
 
     #[test]
     fn ftyp_not_first_box() {
-        init_logger();
-
         let test = test_mp4().boxes(&[FREE, FREE, FTYP, MOOV, MDAT][..]).build();
-        let sanitized = sanitize(test.clone()).unwrap();
-        assert_eq!(sanitized.data, test.mdat);
-        assert_eq!(sanitized.metadata, test.expected_metadata);
-        sanitize(io::Cursor::new(sanitized_data(sanitized, &test.data))).unwrap();
+        test.sanitize_ok();
     }
 
     #[test]
     fn ftyp_not_first_significant_box() {
-        init_logger();
-
         let test = test_mp4().boxes(&[MOOV, FTYP, MDAT][..]).build();
         assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
             assert_matches!(err.current_context(), ParseError::InvalidBoxLayout);
@@ -802,8 +492,6 @@ mod test {
 
     #[test]
     fn no_moov() {
-        init_logger();
-
         let test = test_mp4().boxes(&[FTYP, MDAT][..]).build();
         assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
             assert_matches!(err.current_context(), ParseError::MissingRequiredBox(MOOV));
@@ -812,8 +500,6 @@ mod test {
 
     #[test]
     fn no_mdat() {
-        init_logger();
-
         let test = test_mp4().boxes(&[FTYP, MOOV][..]).build();
         assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
             assert_matches!(err.current_context(), ParseError::MissingRequiredBox(MDAT));
@@ -822,43 +508,26 @@ mod test {
 
     #[test]
     fn free_boxes_in_metadata() {
-        init_logger();
-
         let test = test_mp4().boxes(&[FTYP, FREE, FREE, MOOV, FREE, MDAT][..]).build();
-        let sanitized = sanitize(test.clone()).unwrap();
-        assert_eq!(sanitized.data, test.mdat);
-        assert_eq!(sanitized.metadata, test.expected_metadata);
-        sanitize(io::Cursor::new(sanitized_data(sanitized, &test.data))).unwrap();
+        test.sanitize_ok();
     }
 
     #[test]
     fn free_boxes_after_mdat() {
-        init_logger();
-
         let test = test_mp4().boxes(&[FTYP, MOOV, MDAT, FREE][..]).build();
-        let sanitized = sanitize(test.clone()).unwrap();
-        assert_eq!(sanitized.data, test.mdat);
-        assert_eq!(sanitized.metadata, test.expected_metadata);
-        sanitize(io::Cursor::new(sanitized_data(sanitized, &test.data))).unwrap();
+        test.sanitize_ok();
     }
 
     #[test]
     fn multiple_mdat() {
-        init_logger();
-
-        let test = test_mp4()
+        test_mp4()
             .boxes(&[FTYP, MOOV, MDAT, FREE, MDAT, MDAT, FREE][..])
-            .build();
-        let sanitized = sanitize(test.clone()).unwrap();
-        assert_eq!(sanitized.data, test.mdat);
-        assert_eq!(sanitized.metadata, test.expected_metadata);
-        sanitize(io::Cursor::new(sanitized_data(sanitized, &test.data))).unwrap();
+            .build()
+            .sanitize_ok();
     }
 
     #[test]
     fn uuid() {
-        init_logger();
-
         let test = test_mp4().boxes(&[FTYP, MOOV, TEST_UUID, MDAT][..]).build();
         assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
             assert_matches!(err.current_context(), ParseError::UnsupportedBox(TEST_UUID));
@@ -867,9 +536,9 @@ mod test {
 
     #[test]
     fn mp41() {
-        init_logger();
-
-        let test = test_mp4().major_brand(MP41).add_compatible_brand(MP41).build();
+        let test = test_mp4()
+            .ftyp(test_ftyp().major_brand(MP41).add_compatible_brand(MP41).clone())
+            .build();
         assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
             assert_matches!(err.current_context(), ParseError::UnsupportedFormat(MP41));
         });
@@ -877,20 +546,19 @@ mod test {
 
     #[test]
     fn mp42() {
-        init_logger();
-
-        let test = test_mp4().major_brand(MP42).compatible_brands(vec![MP42, ISOM]).build();
-        let sanitized = sanitize(test.clone()).unwrap();
-        assert_eq!(sanitized.data, test.mdat);
-        assert_eq!(sanitized.metadata, test.expected_metadata);
-        sanitize(io::Cursor::new(sanitized_data(sanitized, &test.data))).unwrap();
+        let ftyp = test_ftyp()
+            .major_brand(MP42)
+            .compatible_brands(vec![MP42, ISOM])
+            .clone();
+        let test = test_mp4().ftyp(ftyp).build();
+        test.sanitize_ok();
     }
 
     #[test]
     fn no_compatible_brands() {
-        init_logger();
-
-        let test = test_mp4().major_brand(ISOM).compatible_brands(vec![]).build();
+        let test = test_mp4()
+            .ftyp(test_ftyp().major_brand(ISOM).compatible_brands(vec![]).clone())
+            .build();
         assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
             assert_matches!(err.current_context(), ParseError::UnsupportedFormat(ISOM));
         });
@@ -898,8 +566,6 @@ mod test {
 
     #[test]
     fn no_trak() {
-        init_logger();
-
         let test = test_mp4().moov(test_moov().trak(false).clone()).build();
         assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
             assert_matches!(err.current_context(), ParseError::MissingRequiredBox(TRAK));
@@ -908,8 +574,6 @@ mod test {
 
     #[test]
     fn no_mdia() {
-        init_logger();
-
         let test = test_mp4()
             .boxes(&[FTYP, MDAT, MOOV][..])
             .moov(test_moov().mdia(false).clone())
@@ -921,8 +585,6 @@ mod test {
 
     #[test]
     fn no_minf() {
-        init_logger();
-
         let test = test_mp4()
             .boxes(&[FTYP, MDAT, MOOV][..])
             .moov(test_moov().minf(false).clone())
@@ -934,8 +596,6 @@ mod test {
 
     #[test]
     fn no_stbl() {
-        init_logger();
-
         let test = test_mp4()
             .boxes(&[FTYP, MDAT, MOOV][..])
             .moov(test_moov().stbl(false).clone())
@@ -947,8 +607,6 @@ mod test {
 
     #[test]
     fn no_stco() {
-        init_logger();
-
         let test = test_mp4()
             .boxes(&[FTYP, MDAT, MOOV][..])
             .moov(test_moov().stco(false).clone())
@@ -960,22 +618,15 @@ mod test {
 
     #[test]
     fn co64() {
-        init_logger();
-
-        let test = test_mp4()
+        test_mp4()
             .boxes(&[FTYP, MDAT, MOOV][..])
             .moov(test_moov().stco(false).co64(true).clone())
-            .build();
-        let sanitized = sanitize(test.clone()).unwrap();
-        assert_eq!(sanitized.data, test.mdat);
-        assert_eq!(sanitized.metadata, test.expected_metadata);
-        sanitize(io::Cursor::new(sanitized_data(sanitized, &test.data))).unwrap();
+            .build()
+            .sanitize_ok();
     }
 
     #[test]
     fn stco_and_co64() {
-        init_logger();
-
         let test = test_mp4()
             .boxes(&[FTYP, MDAT, MOOV][..])
             .moov(test_moov().co64(true).clone())
