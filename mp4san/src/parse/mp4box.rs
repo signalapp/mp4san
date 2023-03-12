@@ -123,6 +123,13 @@ impl<T: ParsedBox + ?Sized> Mp4Box<T> {
     }
 }
 
+impl AnyMp4Box {
+    pub fn with_bytes(box_type: BoxType, bytes: BytesMut) -> Self {
+        let parsed_header = BoxHeader::with_data_size(box_type, bytes.len() as u64).expect("box size overflow");
+        Self { parsed_header, data: BoxData::Bytes(bytes) }
+    }
+}
+
 impl<T: ParsedBox> From<Mp4Box<T>> for AnyMp4Box {
     fn from(from: Mp4Box<T>) -> Self {
         Self { parsed_header: from.parsed_header, data: from.data.into() }

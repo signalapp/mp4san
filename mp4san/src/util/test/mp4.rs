@@ -2,6 +2,7 @@ use std::io;
 
 use bytes::{Buf, Bytes};
 use derive_builder::Builder;
+use mp4san_test_ffmpeg::verify_ffmpeg;
 
 use crate::parse::box_type::{FREE, FTYP, MDAT, MOOV};
 use crate::parse::BoxType;
@@ -21,11 +22,13 @@ pub struct TestMp4Spec {
     #[builder(default)]
     moov: TestMoovBuilder,
 
-    #[builder(default)]
+    #[builder(default = "DEFAULT_MDAT_DATA.to_vec()")]
     #[builder(setter(into, each(name = "add_mdat_data", into)))]
     mdat_data: Vec<u8>,
 
-    #[builder(default = "Some(self.mdat_data.as_deref().unwrap_or_default().len() as u64)")]
+    #[builder(
+        default = "Some(self.mdat_data.as_deref().map(|mdat| mdat.len()).unwrap_or(DEFAULT_MDAT_DATA.len()) as u64)"
+    )]
     #[builder(setter(strip_option))]
     mdat_data_len: Option<u64>,
 
@@ -39,9 +42,12 @@ pub struct TestMp4 {
     pub data: Bytes,
     pub data_len: u64,
     pub expected_metadata: Bytes,
+    pub mdat_data: Vec<u8>,
     pub mdat: InputSpan,
     pub mdat_skipped: u64,
 }
+
+const DEFAULT_MDAT_DATA: &[u8] = &[0xBA, 0xDC, 0x0F, 0xFE, 0xBE, 0xEF];
 
 impl TestMp4Builder {
     pub fn mdat_data_until_eof(&mut self) -> &mut Self {
@@ -54,10 +60,13 @@ impl TestMp4Builder {
 
         let spec = self.build_spec().unwrap();
         let mut moov = spec.moov;
-        moov.co_entries(vec![0]);
+        for mdat_data_idx in 0..spec.mdat_data.len() {
+            moov.add_co_entry(mdat_data_idx as u64);
+        }
 
         let mut data = vec![];
         let mut mdat: Option<InputSpan> = None;
+        let mut mdat_header_len = None;
         let mut moov_offsets = Vec::new();
         let mut metadata_free_len = 0;
         for box_type in &spec.boxes {
@@ -71,6 +80,7 @@ impl TestMp4Builder {
                 }
                 MDAT => {
                     let written_mdat = write_mdat_header(&mut data, spec.mdat_data_len);
+                    mdat_header_len = Some(data.len() as u64 - written_mdat.offset);
                     data.extend_from_slice(&spec.mdat_data);
 
                     let mdat_data_len = spec.mdat_data_len.unwrap_or(spec.mdat_data.len() as u64);
@@ -96,11 +106,12 @@ impl TestMp4Builder {
         }
 
         let mdat = mdat.unwrap_or(InputSpan { offset: data.len() as u64, len: 0 });
+        let mdat_header_len = mdat_header_len.unwrap_or(0);
 
         // Calculate and write correct chunk offsets
         let mut co_entries = moov.build_spec().unwrap().co_entries;
         for co_entry in &mut co_entries {
-            *co_entry += mdat.offset;
+            *co_entry += mdat.offset + mdat_header_len;
         }
         for moov_offset in &moov_offsets {
             let moov = moov.co_entries(co_entries.clone()).build();
@@ -123,8 +134,8 @@ impl TestMp4Builder {
 
         // Calculate and write correct expected output chunk offsets
         for co_entry in &mut co_entries {
-            *co_entry -= mdat.offset;
-            *co_entry += expected_metadata.len() as u64;
+            *co_entry -= mdat.offset + mdat_header_len;
+            *co_entry += expected_metadata.len() as u64 + mdat_header_len;
         }
         for expected_metadata_moov_offset in expected_metadata_moov_offsets {
             let moov = moov.co_entries(co_entries.clone()).build();
@@ -135,6 +146,7 @@ impl TestMp4Builder {
             data_len: data.len() as u64,
             data: data.into(),
             expected_metadata: expected_metadata.into(),
+            mdat_data: spec.mdat_data,
             mdat,
             mdat_skipped: 0,
         }
@@ -147,6 +159,7 @@ impl TestMp4 {
         assert_eq!(sanitized.data, self.mdat);
         assert_eq!(sanitized.metadata, self.expected_metadata);
         sanitize(io::Cursor::new(sanitized_data(sanitized.clone(), &self.data))).unwrap();
+        verify_ffmpeg(&self.data, &self.mdat_data);
         sanitized
     }
 }

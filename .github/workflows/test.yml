@@ -40,13 +40,16 @@ jobs:
       - name: cargo build
         run:  cargo build --verbose
 
+      - name: install libav libraries for ffmpeg tests
+        run:  sudo apt-get install -y libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev
+
       - name: cargo test -- --skip test_data
-        run:  cargo test --verbose -- --skip test_data
+        run:  cargo test --verbose --features ffmpeg-tests -- --skip test_data
 
       - name: cargo test test_data
         continue-on-error: true
         if: ${{ env.TEST_DATA_SSH_KEY != '' }}
-        run:  cargo test --verbose test_data -- --show-output
+        run:  cargo test --verbose --features ffmpeg-tests test_data -- --show-output
 
       - name: cargo clippy
         uses: actions-rs/clippy-check@v1

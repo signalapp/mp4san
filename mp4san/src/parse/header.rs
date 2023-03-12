@@ -197,15 +197,28 @@ macro_rules! box_type {
 
 box_type! {
     CO64,
+    DINF,
+    DREF,
     FREE,
     FTYP,
+    HDLR,
     MDAT,
+    MDHD,
     MDIA,
+    META,
+    METT,
     MINF,
     MOOV,
+    MVHD,
     STBL,
     STCO,
+    STSC,
+    STSD,
+    STSZ,
+    STTS,
+    TKHD,
     TRAK,
+    URL,
     UUID,
 }
 

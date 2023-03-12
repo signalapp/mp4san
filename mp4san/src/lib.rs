@@ -434,8 +434,9 @@ mod test {
 
     #[test]
     fn max_input_length() {
-        let test = test_mp4().mdat_data_len(u64::MAX - 16).build();
-        let test = test_mp4().mdat_data_len(u64::MAX - test.data.len() as u64).build();
+        let mut test = test_mp4().mdat_data(vec![]).clone();
+        let test_data_len = test.mdat_data_len(u64::MAX - 16).build().data.len() as u64;
+        let test = test.mdat_data_len(u64::MAX - test_data_len).build();
         let sanitized = sanitize(test.clone()).unwrap();
         assert_eq!(sanitized.data, test.mdat);
         assert_eq!(sanitized.data.offset + sanitized.data.len, u64::MAX);
@@ -444,8 +445,9 @@ mod test {
 
     #[test]
     fn input_length_overflow() {
-        let test = test_mp4().mdat_data_len(u64::MAX - 16).build();
-        let test = test_mp4().mdat_data_len(u64::MAX - test.data.len() as u64 + 1).build();
+        let mut test = test_mp4().mdat_data(vec![]).clone();
+        let test_data_len = test.mdat_data_len(u64::MAX - 16).build().data.len() as u64;
+        let test = test.mdat_data_len(u64::MAX - test_data_len + 1).build();
         sanitize(test).unwrap_err();
     }
 
