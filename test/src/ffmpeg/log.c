@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include "log.h"
 
 void mp4san_test_ffmpeg_log(int, const char*);
 

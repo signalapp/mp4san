@@ -15,7 +15,8 @@ exclude = ["/.github", ".*"]
 
 [features]
 default = ["ffmpeg-tests"]
-ffmpeg-tests = ["mp4san-test-ffmpeg/ffmpeg"]
+ffmpeg-tests = ["mp4san-test/ffmpeg"]
+gpac-tests = ["mp4san-test/gpac"]
 
 [dependencies]
 bytes = "1.3.0"
@@ -33,4 +34,4 @@ assert_matches = "1.5.0"
 derive_builder = "0.12.0"
 env_logger = "0.10.0"
 libflate = "1.2.0"
-mp4san-test-ffmpeg = { path = "../test-ffmpeg" }
+mp4san-test = { path = "../test" }

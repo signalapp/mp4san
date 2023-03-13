@@ -2,7 +2,7 @@ use std::io;
 
 use bytes::{Buf, Bytes};
 use derive_builder::Builder;
-use mp4san_test_ffmpeg::verify_ffmpeg;
+use mp4san_test::{verify_ffmpeg, verify_gpac};
 
 use crate::parse::box_type::{FREE, FTYP, MDAT, MOOV};
 use crate::parse::BoxType;
@@ -158,8 +158,10 @@ impl TestMp4 {
         let sanitized = sanitize(self.clone()).unwrap();
         assert_eq!(sanitized.data, self.mdat);
         assert_eq!(sanitized.metadata, self.expected_metadata);
-        sanitize(io::Cursor::new(sanitized_data(sanitized.clone(), &self.data))).unwrap();
-        verify_ffmpeg(&self.data, &self.mdat_data);
+        let sanitized_data = sanitized_data(sanitized.clone(), &self.data);
+        sanitize(io::Cursor::new(&sanitized_data)).unwrap();
+        verify_ffmpeg(&sanitized_data, &self.mdat_data);
+        verify_gpac(&sanitized_data, &self.mdat_data);
         sanitized
     }
 }

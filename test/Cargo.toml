@@ -1,11 +1,12 @@
 [package]
-name = "mp4san-test-ffmpeg"
+name = "mp4san-test"
 edition = "2021"
 version = "0.1.0"
 
 [features]
 default = []
 ffmpeg = ["dep:ac-ffmpeg", "dep:bindgen", "dep:cc", "dep:ffmpeg-sys-next"]
+gpac = ["dep:bindgen", "dep:cc", "dep:pkg-config"]
 
 [dependencies]
 ac-ffmpeg = { version = "0.18.1", optional = true }
@@ -15,3 +16,4 @@ log = "0.4.17"
 [build-dependencies]
 bindgen = { version = "0.64.0", optional = true }
 cc = { version = "1.0.79", optional = true }
+pkg-config = { version = "0.3.26", optional = true }

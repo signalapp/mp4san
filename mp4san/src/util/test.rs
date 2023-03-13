@@ -182,12 +182,12 @@ pub fn write_test_stsc_data<B: BufMut>(mut out: B) {
 pub fn write_test_stsd_data<B: BufMut>(mut out: B) {
     FullBoxHeader::default().put_buf(&mut out);
     out.put_u32(1); // entry count
-    BoxHeader::with_u32_data_size(METT, 1).put_buf(&mut out); // mett header
+    BoxHeader::with_u32_data_size(METT, 9).put_buf(&mut out); // mett header
     for _ in 0..6 {
         out.put_u8(0); // reserved
     }
     out.put_u16(1); // data reference index
-    out.put_u32(0); // mime format
+    out.put_u8(0); // mime format
 }
 
 pub fn write_test_stsz_data<B: BufMut>(mut out: B, chunk_count: u32) {
