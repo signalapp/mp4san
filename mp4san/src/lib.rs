@@ -134,8 +134,13 @@ pub async fn sanitize_async<R: AsyncRead + AsyncSkip>(input: R) -> Result<Saniti
                     MultipleBoxes(BoxType::FTYP)
                 );
                 let mut read_ftyp = Mp4Box::read_data(reader.as_mut(), header).await?;
-                let ftyp_data = read_ftyp.data.parse()?;
+                let ftyp_data: &mut FtypBox = read_ftyp.data.parse()?;
                 log::info!("ftyp @ 0x{start_pos:08x}: {ftyp_data:#?}");
+
+                if !ftyp_data.compatible_brands().any(|b| b == COMPATIBLE_BRAND) {
+                    return Err(report!(ParseError::UnsupportedFormat(ftyp_data.major_brand)).into());
+                };
+
                 ftyp = Some(read_ftyp);
             }
 
@@ -177,12 +182,8 @@ pub async fn sanitize_async<R: AsyncRead + AsyncSkip>(input: R) -> Result<Saniti
         }
     }
 
-    let Some(mut ftyp) = ftyp else {
+    let Some(ftyp) = ftyp else {
         return Err(report!(ParseError::MissingRequiredBox(BoxType::FTYP)).into());
-    };
-    let ftyp_data = ftyp.data.parse()?;
-    if !ftyp_data.compatible_brands().any(|b| b == COMPATIBLE_BRAND) {
-        return Err(report!(ParseError::UnsupportedFormat(ftyp_data.major_brand)).into());
     };
     let Some(moov) = moov else {
         return Err(report!(ParseError::MissingRequiredBox(BoxType::MOOV)).into());
