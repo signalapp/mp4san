@@ -37,7 +37,7 @@ pub enum Error {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SanitizedMetadata {
-    pub metadata: Vec<u8>,
+    pub metadata: Option<Vec<u8>>,
     pub data: InputSpan,
 }
 
@@ -106,6 +106,7 @@ pub async fn sanitize_async<R: AsyncRead + AsyncSkip>(input: R) -> Result<Saniti
     let mut ftyp: Option<Mp4Box<FtypBox>> = None;
     let mut moov: Option<Mp4Box<MoovBox>> = None;
     let mut data: Option<InputSpan> = None;
+    let mut moov_offset = None;
 
     while !reader.as_mut().fill_buf().await?.is_empty() {
         let start_pos = stream_position(reader.as_mut()).await?;
@@ -173,6 +174,7 @@ pub async fn sanitize_async<R: AsyncRead + AsyncSkip>(input: R) -> Result<Saniti
                 let moov_data = read_moov.data.parse()?;
                 log::info!("moov @ 0x{start_pos:08x}: {moov_data:#?}");
                 moov = Some(read_moov);
+                moov_offset = Some(start_pos);
             }
             name => {
                 let box_size = skip_box(reader.as_mut(), &header).await? + header.encoded_len();
@@ -185,12 +187,19 @@ pub async fn sanitize_async<R: AsyncRead + AsyncSkip>(input: R) -> Result<Saniti
     let Some(ftyp) = ftyp else {
         return Err(report!(ParseError::MissingRequiredBox(BoxType::FTYP)).into());
     };
-    let Some(moov) = moov else {
+    let (Some(moov), Some(moov_offset)) = (moov, moov_offset) else {
         return Err(report!(ParseError::MissingRequiredBox(BoxType::MOOV)).into());
     };
     let Some(data) = data else {
         return Err(report!(ParseError::MissingRequiredBox(BoxType::MDAT)).into());
     };
+
+    // Return early if there's nothing to sanitize. Since the only thing the sanitizer does currently is move the moov
+    // to before the mdat to make the mp4 streamable, return if we don't need to do that.
+    if moov_offset < data.offset {
+        log::info!("metadata: nothing to sanitize");
+        return Ok(SanitizedMetadata { metadata: None, data });
+    }
 
     // Make sure none of the metadata boxes use BoxSize::UntilEof, as we want the caller to be able to concatenate movie
     // data to the end of the metadata.
@@ -255,7 +264,7 @@ pub async fn sanitize_async<R: AsyncRead + AsyncSkip>(input: R) -> Result<Saniti
         metadata.resize((metadata_len + pad_size) as usize, 0);
     }
 
-    Ok(SanitizedMetadata { metadata, data })
+    Ok(SanitizedMetadata { metadata: Some(metadata), data })
 }
 
 //
@@ -418,14 +427,18 @@ mod test {
 
         let sanitized = sanitize(io::Cursor::new(&data)).unwrap();
         assert_eq!(sanitized.data, mdat);
-        assert_eq!(sanitized.metadata, metadata);
+        assert_eq!(sanitized.metadata, Some(metadata));
         sanitize(io::Cursor::new(sanitized_data(sanitized, &data))).unwrap();
     }
 
     #[test]
     fn until_eof_sized_mdat() {
-        let test = test_mp4().mdat_data(&b"abcdefg"[..]).mdat_data_until_eof().build();
-        test.sanitize_ok();
+        let test = test_mp4()
+            .boxes(&[FTYP, MOOV, MDAT][..])
+            .mdat_data(&b"abcdefg"[..])
+            .mdat_data_until_eof()
+            .build();
+        test.sanitize_ok_noop();
     }
 
     #[test]
@@ -435,13 +448,13 @@ mod test {
 
     #[test]
     fn max_input_length() {
-        let mut test = test_mp4().mdat_data(vec![]).clone();
+        let mut test = test_mp4().boxes(&[FTYP, MOOV, MDAT][..]).mdat_data(vec![]).clone();
         let test_data_len = test.mdat_data_len(u64::MAX - 16).build().data.len() as u64;
         let test = test.mdat_data_len(u64::MAX - test_data_len).build();
         let sanitized = sanitize(test.clone()).unwrap();
         assert_eq!(sanitized.data, test.mdat);
         assert_eq!(sanitized.data.offset + sanitized.data.len, u64::MAX);
-        assert_eq!(sanitized.metadata, test.expected_metadata);
+        assert_eq!(sanitized.metadata, None);
     }
 
     #[test]
@@ -459,8 +472,8 @@ mod test {
     }
 
     #[test]
-    fn mdat_before_moov() {
-        test_mp4().boxes(&[FTYP, MDAT, MOOV][..]).build().sanitize_ok();
+    fn mdat_after_moov() {
+        test_mp4().boxes(&[FTYP, MOOV, MDAT][..]).build().sanitize_ok_noop();
     }
 
     #[test]
@@ -481,7 +494,7 @@ mod test {
 
     #[test]
     fn ftyp_not_first_box() {
-        let test = test_mp4().boxes(&[FREE, FREE, FTYP, MOOV, MDAT][..]).build();
+        let test = test_mp4().boxes(&[FREE, FREE, FTYP, MDAT, MOOV][..]).build();
         test.sanitize_ok();
     }
 
@@ -511,20 +524,20 @@ mod test {
 
     #[test]
     fn free_boxes_in_metadata() {
-        let test = test_mp4().boxes(&[FTYP, FREE, FREE, MOOV, FREE, MDAT][..]).build();
+        let test = test_mp4().boxes(&[FTYP, FREE, FREE, MDAT, MOOV, FREE][..]).build();
         test.sanitize_ok();
     }
 
     #[test]
     fn free_boxes_after_mdat() {
-        let test = test_mp4().boxes(&[FTYP, MOOV, MDAT, FREE][..]).build();
+        let test = test_mp4().boxes(&[FTYP, MDAT, FREE, MOOV][..]).build();
         test.sanitize_ok();
     }
 
     #[test]
     fn multiple_mdat() {
         test_mp4()
-            .boxes(&[FTYP, MOOV, MDAT, FREE, MDAT, MDAT, FREE][..])
+            .boxes(&[FTYP, MDAT, FREE, MDAT, MDAT, FREE, MOOV][..])
             .build()
             .sanitize_ok();
     }

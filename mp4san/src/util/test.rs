@@ -29,8 +29,13 @@ pub fn init_logger() {
 }
 
 pub fn sanitized_data(sanitized: SanitizedMetadata, data: &[u8]) -> Vec<u8> {
-    let mdat = &data[sanitized.data.offset as usize..][..sanitized.data.len as usize];
-    [&sanitized.metadata[..], mdat].concat()
+    match sanitized.metadata {
+        Some(metadata) => {
+            let mdat = &data[sanitized.data.offset as usize..][..sanitized.data.len as usize];
+            [&metadata[..], mdat].concat()
+        }
+        None => data.to_vec(),
+    }
 }
 
 pub fn test_dinf() -> AnyMp4Box {

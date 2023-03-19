@@ -1,5 +1,7 @@
 use std::io;
+use std::num::NonZeroUsize;
 
+use assert_matches::assert_matches;
 use bytes::{Buf, Bytes};
 use derive_builder::Builder;
 use mp4san_test::{verify_ffmpeg, verify_gpac};
@@ -32,7 +34,7 @@ pub struct TestMp4Spec {
     #[builder(setter(strip_option))]
     mdat_data_len: Option<u64>,
 
-    #[builder(default = "vec![FTYP, MOOV, MDAT]")]
+    #[builder(default = "vec![FTYP, MDAT, MOOV]")]
     #[builder(setter(into, each(name = "add_box")))]
     boxes: Vec<BoxType>,
 }
@@ -68,7 +70,6 @@ impl TestMp4Builder {
         let mut mdat: Option<InputSpan> = None;
         let mut mdat_header_len = None;
         let mut moov_offsets = Vec::new();
-        let mut metadata_free_len = 0;
         for box_type in &spec.boxes {
             match *box_type {
                 FTYP => {
@@ -92,11 +93,12 @@ impl TestMp4Builder {
                 }
                 FREE => {
                     let free_len = 13;
-                    write_test_free(&mut data, free_len);
-                    match &mut mdat {
-                        Some(mdat) => mdat.len += free_len as u64,
-                        None => metadata_free_len += free_len,
+                    if let Some(mdat) = &mut mdat {
+                        if data.len() as u64 == mdat.offset + mdat.len {
+                            mdat.len += free_len as u64;
+                        }
                     }
+                    write_test_free(&mut data, free_len);
                 }
                 TEST_UUID => {
                     write_test_uuid(&mut data);
@@ -128,9 +130,6 @@ impl TestMp4Builder {
             let moov = moov.co_entries(co_entries.clone()).build();
             moov.put_buf(&mut expected_metadata);
         }
-        if metadata_free_len != 0 {
-            write_test_free(&mut expected_metadata, metadata_free_len);
-        }
 
         // Calculate and write correct expected output chunk offsets
         for co_entry in &mut co_entries {
@@ -157,12 +156,32 @@ impl TestMp4 {
     pub fn sanitize_ok(&self) -> SanitizedMetadata {
         let sanitized = sanitize(self.clone()).unwrap();
         assert_eq!(sanitized.data, self.mdat);
-        assert_eq!(sanitized.metadata, self.expected_metadata);
+        assert_matches!(sanitized.metadata.as_deref(), Some(metadata) => {
+            assert_eq!(metadata, self.expected_metadata(metadata.len()));
+        });
         let sanitized_data = sanitized_data(sanitized.clone(), &self.data);
         sanitize(io::Cursor::new(&sanitized_data)).unwrap();
         verify_ffmpeg(&sanitized_data, &self.mdat_data);
         verify_gpac(&sanitized_data, &self.mdat_data);
         sanitized
+    }
+
+    pub fn sanitize_ok_noop(&self) -> SanitizedMetadata {
+        let sanitized = sanitize(self.clone()).unwrap();
+        assert_eq!(sanitized.data, self.mdat);
+        assert_eq!(sanitized.metadata, None);
+        verify_ffmpeg(&self.data, &self.mdat_data);
+        verify_gpac(&self.data, &self.mdat_data);
+        sanitized
+    }
+
+    fn expected_metadata(&self, actual_len: usize) -> Bytes {
+        let Some(pad_len) = self.expected_metadata.len().checked_sub(actual_len).and_then(NonZeroUsize::new) else {
+            return self.expected_metadata.clone();
+        };
+        let mut expected_metadata = self.expected_metadata.to_vec();
+        write_test_free(&mut expected_metadata, pad_len.get() as u32);
+        expected_metadata.into()
     }
 }
 
