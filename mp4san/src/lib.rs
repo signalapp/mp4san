@@ -1,3 +1,51 @@
+#![warn(missing_docs)]
+
+//! `mp4san` is an MP4 format "sanitizer".
+//!
+//! Currently the sanitizer always performs the following functions:
+//!
+//! - Return all metadata present in the input as a self-contained contiguous byte array.
+//! - Find and return a pointer to the span in the input containing the (contiguous) media data.
+//!
+//! "Self-contained and contiguous" metadata means that the metadata can be concatenated with the media data to form a
+//! valid MP4 file.
+//!
+//! The original metadata may or may not need to be modified in order to perform these functions. In the case that the
+//! original metadata does not need to be modified, the returned [`SanitizedMetadata::metadata`] will be [`None`] to
+//! prevent needless data copying.
+//!
+//! # Unsupported MP4 features
+//!
+//! The sanitizer does not currently support:
+//!
+//! - "Fragmented" MP4 files, which are mostly used for adaptive-bitrate streaming.
+//! - Discontiguous media data, i.e. media data (`mdat`) boxes interspersed with the presentation metadata (`moov`) box.
+//! - Media data references (`dref`) pointing to separate files.
+//! - Any similar format, e.g. Quicktime File Format (`mov`) or the legacy MP4 version 1, which does not contain the
+//!   [`isom` compatible brand](COMPATIBLE_BRAND) in its file type header (`ftyp`).
+//!
+//! # Usage
+//!
+//! The main entry points to the sanitizer are [`sanitize`]/[`sanitize_async`], which take a [`Read`] + [`Skip`] input.
+//! The [`Skip`] trait represents a subset of the [`Seek`] trait; an input stream which can be skipped forward, but not
+//! necessarily seeked to arbitrary positions.
+//!
+//! ```
+//! # use mp4san_test::{example_ftyp, example_mdat, example_moov};
+//! #
+//! let example_input = [example_ftyp(), example_mdat(), example_moov()].concat();
+//!
+//! let sanitized = mp4san::sanitize(std::io::Cursor::new(example_input))?;
+//!
+//! assert_eq!(sanitized.metadata, Some([example_ftyp(), example_moov()].concat()));
+//! assert_eq!(sanitized.data.offset, example_ftyp().len() as u64);
+//! assert_eq!(sanitized.data.len, example_mdat().len() as u64);
+//! # Ok::<(), mp4san::Error>(())
+//! ```
+//!
+//! The [`parse`] module also contains a less stable and undocumented API which can be used to parse individual MP4 box
+//! types.
+
 #[macro_use]
 extern crate error_stack;
 
@@ -27,23 +75,45 @@ use crate::util::{checked_add_signed, IoResultExt};
 // public types
 //
 
+/// Error type returned by `mp4san`.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// An IO error occurred while reading the given input.
     #[error("IO error: {0}")]
     Io(#[from] io::Error),
+
+    /// The input could not be parsed as an MP4 file.
+    ///
+    /// This type of error contains an [`error_stack::Report`] which can be used to identify exactly where in the parser
+    /// the error occurred. The [`Display`](std::fmt::Display) implementation, for example, will print a human-readable
+    /// parser stack trace. The underlying [`ParseError`] cause can also be retrieved e.g. for matching against with
+    /// [`Report::current_context`].
     #[error("Parse error: {0}")]
     Parse(Report<ParseError>),
 }
 
+/// Sanitized metadata returned by the sanitizer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SanitizedMetadata {
+    /// The sanitized metadata from the given input, as a self-contained contiguous byte array.
+    ///
+    /// "Self-contained and contiguous" means that the metadata can be concatenated with the [media data](Self::data) to
+    /// form a valid MP4 file.
+    ///
+    /// If the original metadata did not need to be modified, this will be [`None`].
     pub metadata: Option<Vec<u8>>,
+
+    /// A pointer to the span in the input containing the (contiguous) media data.
     pub data: InputSpan,
 }
 
+/// A pointer to a span in the given input.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct InputSpan {
+    /// The offset from the beginning of the input where the span begins.
     pub offset: u64,
+
+    /// The length of the span.
     pub len: u64,
 }
 
@@ -79,6 +149,10 @@ pub trait AsyncSkip {
     fn poll_stream_len(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<u64>>;
 }
 
+/// The ISO Base Media File Format "compatble brand" recognized by the sanitizer.
+///
+/// This compatible brand must be present in the input's file type header (`ftyp`) in order to be parsed by the
+/// sanitizer.
 pub const COMPATIBLE_BRAND: FourCC = FourCC { value: *b"isom" };
 
 //
@@ -95,10 +169,51 @@ const MAX_READ_BOX_SIZE: u64 = 200 * 1024 * 1024;
 // public functions
 //
 
+/// Sanitize an MP4 input.
+///
+/// The `input` must implement [`Read`] + [`Skip`], where [`Skip`] represents a subset of the [`Seek`] trait; an input
+/// stream which can be skipped forward, but not necessarily seeked to arbitrary positions.
+///
+/// See the [module-level documentation](self) for usage examples.
+///
+/// # Errors
+///
+/// If the input cannot be parsed, or an IO error occurs, an [`Error`] is returned.
 pub fn sanitize<R: Read + Skip + Unpin>(input: R) -> Result<SanitizedMetadata, Error> {
     sync::sanitize(input)
 }
 
+/// Sanitize an MP4 input asynchronously.
+///
+/// The `input` must implement [`AsyncRead`] + [`AsyncSkip`], where [`AsyncSkip`] represents a subset of the
+/// [`AsyncSeek`] trait; an input stream which can be skipped forward, but not necessarily seeked to arbitrary
+/// positions.
+///
+/// # Examples
+///
+/// ```
+/// # use mp4san::sanitize_async;
+/// # use mp4san_test::{example_ftyp, example_mdat, example_moov};
+/// #
+/// # fn main() -> Result<(), mp4san::Error> {
+/// #     futures::FutureExt::now_or_never(run()).unwrap()
+/// # }
+/// #
+/// # async fn run() -> Result<(), mp4san::Error> {
+/// let example_input = [example_ftyp(), example_mdat(), example_moov()].concat();
+///
+/// let sanitized = sanitize_async(futures::io::Cursor::new(example_input)).await?;
+///
+/// assert_eq!(sanitized.metadata, Some([example_ftyp(), example_moov()].concat()));
+/// assert_eq!(sanitized.data.offset, example_ftyp().len() as u64);
+/// assert_eq!(sanitized.data.len, example_mdat().len() as u64);
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// If the input cannot be parsed, or an IO error occurs, an [`Error`] is returned.
 pub async fn sanitize_async<R: AsyncRead + AsyncSkip>(input: R) -> Result<SanitizedMetadata, Error> {
     let reader = BufReader::with_capacity(BoxHeader::MAX_SIZE as usize, input);
     pin_mut!(reader);
@@ -398,6 +513,10 @@ impl From<Report<ParseError>> for Error {
         Self::Parse(from)
     }
 }
+
+#[cfg(doctest)]
+#[doc = include_str!("../../README.md")]
+pub mod readme {}
 
 #[cfg(test)]
 mod test {

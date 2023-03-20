@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use std::mem::size_of;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};

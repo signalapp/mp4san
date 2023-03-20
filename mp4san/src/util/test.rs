@@ -10,7 +10,7 @@ use crate::parse::box_type::{DINF, DREF, FREE, HDLR, MDAT, MDHD, METT, MVHD, STS
 use crate::parse::{AnyMp4Box, BoxHeader, BoxType, BoxUuid, FourCC, FullBoxHeader, Mp4Box};
 use crate::{InputSpan, SanitizedMetadata};
 
-pub const TEST_UUID: BoxType = BoxType::Uuid(BoxUuid(*b"thisisatestuuid!"));
+pub const TEST_UUID: BoxType = BoxType::Uuid(BoxUuid { value: *b"thisisatestuuid!" });
 pub const MP42: FourCC = FourCC { value: *b"mp42" };
 pub const MP41: FourCC = FourCC { value: *b"mp41" };
 pub const ISOM: FourCC = FourCC { value: *b"isom" };

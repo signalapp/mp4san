@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use bytes::{BufMut, BytesMut};
 use error_stack::Result;
 

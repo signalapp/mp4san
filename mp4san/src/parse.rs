@@ -1,3 +1,5 @@
+//! Unstable API for parsing individual MP4 box types.
+
 pub(self) mod co;
 mod co64;
 pub(crate) mod error;

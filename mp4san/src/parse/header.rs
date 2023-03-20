@@ -12,12 +12,14 @@ use crate::sync::buf_async_reader;
 use super::error::WhileParsingBox;
 use super::{FourCC, Mpeg4Int, ParseError};
 
+#[allow(missing_docs)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BoxHeader {
     box_type: BoxType,
     box_size: BoxSize,
 }
 
+#[allow(missing_docs)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BoxSize {
     UntilEof,
@@ -25,22 +27,32 @@ pub enum BoxSize {
     Ext(u64),
 }
 
+/// An MP4 box type.
 #[derive(Clone, Copy, Debug, Display, From, PartialEq, Eq)]
 pub enum BoxType {
+    /// A box type in four-byte character code form.
     FourCC(FourCC),
+
+    /// A box type in UUID form.
     Uuid(BoxUuid),
 }
 
+/// An MP4 box type as a UUID.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(transparent)]
-pub struct BoxUuid(pub [u8; 16]);
+pub struct BoxUuid {
+    /// The UUID, as an array of 16 bytes.
+    pub value: [u8; 16],
+}
 
+#[allow(missing_docs)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FullBoxHeader {
     pub version: u8,
     pub flags: u32,
 }
 
+#[allow(missing_docs)]
 impl BoxHeader {
     pub const MAX_SIZE: u64 = 32;
 
@@ -103,7 +115,7 @@ impl BoxHeader {
             FourCC::UUID => {
                 let mut uuid = [0; 16];
                 input.read_exact(&mut uuid).await?;
-                BoxType::Uuid(BoxUuid(uuid))
+                BoxType::Uuid(BoxUuid { value: uuid })
             }
             fourcc => fourcc.into(),
         };
@@ -163,11 +175,12 @@ impl BoxHeader {
         }
 
         if let BoxType::Uuid(uuid) = self.box_type {
-            out.put(&uuid.0[..]);
+            out.put(&uuid.value[..]);
         }
     }
 }
 
+#[allow(missing_docs)]
 impl BoxSize {
     pub const fn size(&self) -> Option<u64> {
         match *self {
@@ -181,16 +194,26 @@ impl BoxSize {
 macro_rules! box_type {
     ($($name:ident),+ $(,)?) => {
         impl FourCC {
-            $(pub const $name: Self = box_name_to_fourcc(stringify!($name));)+
+            $(
+                #[doc = concat!("The `", stringify!($name), "` box type.")]
+                pub const $name: Self = box_name_to_fourcc(stringify!($name));
+            )+
         }
 
         impl BoxType {
-            $(pub const $name: Self = Self::FourCC(FourCC::$name);)+
+            $(
+                #[doc = concat!("The `", stringify!($name), "` box type.")]
+                pub const $name: Self = Self::FourCC(FourCC::$name);
+            )+
         }
 
+        /// [`BoxType`] constants.
         pub mod box_type {
             use super::BoxType;
-            $(pub const $name: BoxType = BoxType::$name;)+
+            $(
+                #[doc = concat!("The `", stringify!($name), "` box type.")]
+                pub const $name: BoxType = BoxType::$name;
+            )+
         }
     };
 }
@@ -224,7 +247,7 @@ box_type! {
 
 impl fmt::Display for BoxUuid {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self([a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p]) = *self;
+        let Self { value: [a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p] } = *self;
         write!(
             fmt,
             "{a:02x}{b:02x}{c:02x}{d:02x}-{e:02x}{f:02x}-{g:02x}{h:02x}-{i:02x}{j:02x}-{k:02x}{l:02x}{m:02x}{n:02x}{o:02x}{p:02x}",
@@ -232,6 +255,7 @@ impl fmt::Display for BoxUuid {
     }
 }
 
+#[allow(missing_docs)]
 impl FullBoxHeader {
     pub const fn default() -> Self {
         Self { version: 0, flags: 0 }

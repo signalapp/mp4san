@@ -6,20 +6,41 @@ use derive_more::Display;
 
 use super::{BoxType, FourCC};
 
+/// Error type returned by the MP4 parser.
+///
+/// While the API of this error type is currently considered unstable, it is more stably guaranteed to implement
+/// [`Display`] + [`Debug`] + [`Error`](std::error::Error).
+#[allow(missing_docs)]
 #[derive(Clone, Debug, thiserror::Error)]
 pub enum ParseError {
+    /// The input is invalid because its boxes are in a ordering or configuration disallowed by the ISO specification.
     #[error("Invalid box layout")]
     InvalidBoxLayout,
+
+    /// The input is invalid.
     #[error("Invalid input")]
     InvalidInput,
+
+    /// The input is invalid because it is missing a box required by the ISO specification.
     #[error("Missing required `{0}` box")]
     MissingRequiredBox(BoxType),
+
+    /// The input is invalid because the input ended before the end of a box.
+    ///
+    /// This can occur either when the entire input is truncated or when a box size is incorrect.
     #[error("Truncated box")]
     TruncatedBox,
+
+    /// The input is unsupported because it contains an unknown box.
     #[error("Unsupported box `{0}`")]
     UnsupportedBox(BoxType),
+
+    /// The input is unsupported because its boxes are in an unsupported ordering.
     #[error("Unsupported box layout")]
     UnsupportedBoxLayout,
+
+    /// The input is unsupported because it doesn't contain [`COMPATIBLE_BRAND`](crate::COMPATIBLE_BRAND) in its file
+    /// type header (`ftyp`).
     #[error("Unsupported format `{0}`")]
     UnsupportedFormat(FourCC),
 }

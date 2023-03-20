@@ -9,12 +9,15 @@ use super::error::ParseResultExt;
 use super::integers::Mpeg4IntWriterExt;
 use super::{Mpeg4Int, ParseError};
 
+/// A four-byte character code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FourCC {
+    /// The character code, as an array of four bytes.
     pub value: [u8; 4],
 }
 
 impl FourCC {
+    /// Return the size of a [`FourCC`].
     pub const fn size() -> u64 {
         4
     }
@@ -26,6 +29,7 @@ impl FourCC {
         Ok(Self { value })
     }
 
+    /// Writes `self` to the [`BufMut`] `out`.
     pub fn put_buf<B: BufMut>(&self, mut out: B) {
         out.put(&self.value[..])
     }
