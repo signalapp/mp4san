@@ -8,7 +8,7 @@ use mp4san_test::{verify_ffmpeg, verify_gpac};
 
 use crate::parse::box_type::{FREE, FTYP, MDAT, MOOV};
 use crate::parse::BoxType;
-use crate::{sanitize, InputSpan, SanitizedMetadata, Skip};
+use crate::{sanitize, sanitize_with_config, Config, InputSpan, SanitizedMetadata, Skip};
 
 use super::{
     init_logger, sanitized_data, write_mdat_header, write_test_free, write_test_uuid, TestFtypBuilder, TestMoovBuilder,
@@ -58,33 +58,35 @@ impl TestMp4Builder {
     }
 
     pub fn build(&self) -> TestMp4 {
+        self.build_spec().unwrap().build()
+    }
+}
+
+impl TestMp4Spec {
+    pub fn build(&self) -> TestMp4 {
         init_logger();
 
-        let spec = self.build_spec().unwrap();
-        let mut moov = spec.moov;
-        for mdat_data_idx in 0..spec.mdat_data.len() {
-            moov.add_co_entry(mdat_data_idx as u64);
-        }
+        let mut moov = self.moov();
 
         let mut data = vec![];
         let mut mdat: Option<InputSpan> = None;
         let mut mdat_header_len = None;
         let mut moov_offsets = Vec::new();
-        for box_type in &spec.boxes {
+        for box_type in &self.boxes {
             match *box_type {
                 FTYP => {
-                    spec.ftyp.build().put_buf(&mut data);
+                    self.ftyp.build().put_buf(&mut data);
                 }
                 MOOV => {
                     moov_offsets.push(data.len());
                     moov.build().put_buf(&mut data);
                 }
                 MDAT => {
-                    let written_mdat = write_mdat_header(&mut data, spec.mdat_data_len);
+                    let written_mdat = write_mdat_header(&mut data, self.mdat_data_len);
                     mdat_header_len = Some(data.len() as u64 - written_mdat.offset);
-                    data.extend_from_slice(&spec.mdat_data);
+                    data.extend_from_slice(&self.mdat_data);
 
-                    let mdat_data_len = spec.mdat_data_len.unwrap_or(spec.mdat_data.len() as u64);
+                    let mdat_data_len = self.mdat_data_len.unwrap_or(self.mdat_data.len() as u64);
                     let mdat_len = written_mdat.len.saturating_add(mdat_data_len);
                     match &mut mdat {
                         Some(mdat) => mdat.len += mdat_len,
@@ -123,7 +125,7 @@ impl TestMp4Builder {
         // Calculate expected output metadata. NB: The expectation that the output metadata matches the input
         // metadata verbatim is overly-strict and could be weakened.
         let mut expected_metadata = vec![];
-        spec.ftyp.build().put_buf(&mut expected_metadata);
+        self.ftyp.build().put_buf(&mut expected_metadata);
         let mut expected_metadata_moov_offsets = Vec::new();
         for _ in moov_offsets {
             expected_metadata_moov_offsets.push(expected_metadata.len());
@@ -145,16 +147,28 @@ impl TestMp4Builder {
             data_len: data.len() as u64,
             data: data.into(),
             expected_metadata: expected_metadata.into(),
-            mdat_data: spec.mdat_data,
+            mdat_data: self.mdat_data.clone(),
             mdat,
             mdat_skipped: 0,
         }
+    }
+
+    pub fn moov(&self) -> TestMoovBuilder {
+        let mut moov = self.moov.clone();
+        for mdat_data_idx in 0..self.mdat_data.len() {
+            moov.add_co_entry(mdat_data_idx as u64);
+        }
+        moov
     }
 }
 
 impl TestMp4 {
     pub fn sanitize_ok(&self) -> SanitizedMetadata {
-        let sanitized = sanitize(self.clone()).unwrap();
+        self.sanitize_ok_with_config(Config::default())
+    }
+
+    pub fn sanitize_ok_with_config(&self, config: Config) -> SanitizedMetadata {
+        let sanitized = sanitize_with_config(self.clone(), config).unwrap();
         assert_eq!(sanitized.data, self.mdat);
         assert_matches!(sanitized.metadata.as_deref(), Some(metadata) => {
             assert_eq!(metadata, self.expected_metadata(metadata.len()));

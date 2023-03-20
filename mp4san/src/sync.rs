@@ -6,15 +6,15 @@ use std::task::{Context, Poll};
 use bytes::Buf;
 use futures::{AsyncRead, FutureExt};
 
-use crate::{sanitize_async, AsyncSkip, Error, SanitizedMetadata, Skip};
+use crate::{sanitize_async_with_config, AsyncSkip, Config, Error, SanitizedMetadata, Skip};
 
 //
 // public functions
 //
 
-pub fn sanitize<R: Read + Skip + Unpin>(input: R) -> Result<SanitizedMetadata, Error> {
+pub fn sanitize_with_config<R: Read + Skip + Unpin>(input: R, config: Config) -> Result<SanitizedMetadata, Error> {
     // Using AsyncInputAdapter is OK here because this is a blocking (non-async) API.
-    let future = sanitize_async(AsyncInputAdapter(input));
+    let future = sanitize_async_with_config(AsyncInputAdapter(input), config);
 
     // `future` should never yield, as the wrapped synchronous input is the only thing `awaited` upon in the sanitizer.
     future.now_or_never().unwrap_or_else(|| unreachable!())

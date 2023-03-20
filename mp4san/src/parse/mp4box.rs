@@ -15,7 +15,7 @@ use futures::io::BufReader;
 use futures::{AsyncRead, AsyncReadExt};
 
 use crate::util::IoResultExt;
-use crate::{stream_len, stream_position, AsyncSkip, BoxDataTooLarge, Error, MAX_READ_BOX_SIZE};
+use crate::{stream_len, stream_position, AsyncSkip, BoxDataTooLarge, Error};
 
 use super::error::{MultipleBoxes, ParseResultExt, WhileParsingBox};
 use super::{BoxHeader, BoxType, ParseError};
@@ -70,7 +70,11 @@ impl<T: ParsedBox + ?Sized> Mp4Box<T> {
     }
 
     /// Read and parse a box's data assuming its header has already been read.
-    pub(crate) async fn read_data<R>(mut reader: Pin<&mut BufReader<R>>, header: BoxHeader) -> StdResult<Self, Error>
+    pub(crate) async fn read_data<R>(
+        mut reader: Pin<&mut BufReader<R>>,
+        header: BoxHeader,
+        max_size: u64,
+    ) -> StdResult<Self, Error>
     where
         R: AsyncRead + AsyncSkip,
         T: ParseBox,
@@ -81,9 +85,9 @@ impl<T: ParsedBox + ?Sized> Mp4Box<T> {
         };
 
         ensure_attach!(
-            box_data_size <= MAX_READ_BOX_SIZE,
+            box_data_size <= max_size,
             ParseError::InvalidInput,
-            BoxDataTooLarge(box_data_size),
+            BoxDataTooLarge(box_data_size, max_size),
             WhileParsingBox(header.box_type()),
         );
 

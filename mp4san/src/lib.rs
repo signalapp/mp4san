@@ -62,6 +62,7 @@ use std::io::{Read, Seek};
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 
+use derive_builder::Builder;
 use derive_more::Display;
 use error_stack::Report;
 use futures::io::BufReader;
@@ -74,6 +75,19 @@ use crate::util::{checked_add_signed, IoResultExt};
 //
 // public types
 //
+
+#[derive(Builder, Clone)]
+#[builder(build_fn(name = "try_build"))]
+/// Configuration for the MP4 sanitizer.
+pub struct Config {
+    /// The maximum size of metadata to support.
+    ///
+    /// This is useful to set an upper bound on memory consumption in the parser.
+    ///
+    /// The default is 1 GiB.
+    #[builder(default = "1024 * 1024 * 1024")]
+    pub max_metadata_size: u64,
+}
 
 /// Error type returned by `mp4san`.
 #[derive(Debug, thiserror::Error)]
@@ -160,16 +174,16 @@ pub const COMPATIBLE_BRAND: FourCC = FourCC { value: *b"isom" };
 //
 
 #[derive(Clone, Copy, Debug, Display)]
-#[display(fmt = "box data too large: {} > {}", _0, MAX_READ_BOX_SIZE)]
-struct BoxDataTooLarge(u64);
+#[display(fmt = "box data too large: {} > {}", _0, _1)]
+struct BoxDataTooLarge(u64, u64);
 
-const MAX_READ_BOX_SIZE: u64 = 200 * 1024 * 1024;
+const MAX_FTYP_SIZE: u64 = 1024;
 
 //
 // public functions
 //
 
-/// Sanitize an MP4 input.
+/// Sanitize an MP4 input, with the default [`Config`].
 ///
 /// The `input` must implement [`Read`] + [`Skip`], where [`Skip`] represents a subset of the [`Seek`] trait; an input
 /// stream which can be skipped forward, but not necessarily seeked to arbitrary positions.
@@ -180,10 +194,37 @@ const MAX_READ_BOX_SIZE: u64 = 200 * 1024 * 1024;
 ///
 /// If the input cannot be parsed, or an IO error occurs, an [`Error`] is returned.
 pub fn sanitize<R: Read + Skip + Unpin>(input: R) -> Result<SanitizedMetadata, Error> {
-    sync::sanitize(input)
+    sanitize_with_config(input, Config::default())
 }
 
-/// Sanitize an MP4 input asynchronously.
+/// Sanitize an MP4 input, with the given [`Config`].
+///
+/// The `input` must implement [`Read`] + [`Skip`], where [`Skip`] represents a subset of the [`Seek`] trait; an input
+/// stream which can be skipped forward, but not necessarily seeked to arbitrary positions.
+///
+/// ```
+/// # use mp4san_test::{example_ftyp, example_mdat, example_moov};
+/// #
+/// let example_input = [example_ftyp(), example_mdat(), example_moov()].concat();
+///
+/// let config = mp4san::Config::builder().max_metadata_size(example_moov().len() as u64).build();
+/// let sanitized = mp4san::sanitize_with_config(std::io::Cursor::new(example_input), config)?;
+///
+/// assert_eq!(sanitized.metadata, Some([example_ftyp(), example_moov()].concat()));
+/// assert_eq!(sanitized.data.offset, example_ftyp().len() as u64);
+/// assert_eq!(sanitized.data.len, example_mdat().len() as u64);
+/// #
+/// # Ok::<(), mp4san::Error>(())
+/// ```
+///
+/// # Errors
+///
+/// If the input cannot be parsed, or an IO error occurs, an [`Error`] is returned.
+pub fn sanitize_with_config<R: Read + Skip + Unpin>(input: R, config: Config) -> Result<SanitizedMetadata, Error> {
+    sync::sanitize_with_config(input, config)
+}
+
+/// Sanitize an MP4 input asynchronously, with the default [`Config`].
 ///
 /// The `input` must implement [`AsyncRead`] + [`AsyncSkip`], where [`AsyncSkip`] represents a subset of the
 /// [`AsyncSeek`] trait; an input stream which can be skipped forward, but not necessarily seeked to arbitrary
@@ -215,6 +256,45 @@ pub fn sanitize<R: Read + Skip + Unpin>(input: R) -> Result<SanitizedMetadata, E
 ///
 /// If the input cannot be parsed, or an IO error occurs, an [`Error`] is returned.
 pub async fn sanitize_async<R: AsyncRead + AsyncSkip>(input: R) -> Result<SanitizedMetadata, Error> {
+    sanitize_async_with_config(input, Config::default()).await
+}
+
+/// Sanitize an MP4 input asynchronously, with the given [`Config`].
+///
+/// The `input` must implement [`AsyncRead`] + [`AsyncSkip`], where [`AsyncSkip`] represents a subset of the
+/// [`AsyncSeek`] trait; an input stream which can be skipped forward, but not necessarily seeked to arbitrary
+/// positions.
+///
+/// # Examples
+///
+/// ```
+/// # use mp4san::{sanitize_async_with_config, Config};
+/// # use mp4san_test::{example_ftyp, example_mdat, example_moov};
+/// #
+/// # fn main() -> Result<(), mp4san::Error> {
+/// #     futures::FutureExt::now_or_never(run()).unwrap()
+/// # }
+/// #
+/// # async fn run() -> Result<(), mp4san::Error> {
+/// let example_input = [example_ftyp(), example_mdat(), example_moov()].concat();
+///
+/// let config = Config::builder().max_metadata_size(example_moov().len() as u64).build();
+/// let sanitized = sanitize_async_with_config(futures::io::Cursor::new(example_input), config).await?;
+///
+/// assert_eq!(sanitized.metadata, Some([example_ftyp(), example_moov()].concat()));
+/// assert_eq!(sanitized.data.offset, example_ftyp().len() as u64);
+/// assert_eq!(sanitized.data.len, example_mdat().len() as u64);
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// If the input cannot be parsed, or an IO error occurs, an [`Error`] is returned.
+pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(
+    input: R,
+    config: Config,
+) -> Result<SanitizedMetadata, Error> {
     let reader = BufReader::with_capacity(BoxHeader::MAX_SIZE as usize, input);
     pin_mut!(reader);
 
@@ -249,7 +329,7 @@ pub async fn sanitize_async<R: AsyncRead + AsyncSkip>(input: R) -> Result<Saniti
                     ParseError::InvalidBoxLayout,
                     MultipleBoxes(BoxType::FTYP)
                 );
-                let mut read_ftyp = Mp4Box::read_data(reader.as_mut(), header).await?;
+                let mut read_ftyp = Mp4Box::read_data(reader.as_mut(), header, MAX_FTYP_SIZE).await?;
                 let ftyp_data: &mut FtypBox = read_ftyp.data.parse()?;
                 log::info!("ftyp @ 0x{start_pos:08x}: {ftyp_data:#?}");
 
@@ -285,7 +365,7 @@ pub async fn sanitize_async<R: AsyncRead + AsyncSkip>(input: R) -> Result<Saniti
                 }
             }
             BoxType::MOOV => {
-                let mut read_moov = Mp4Box::read_data(reader.as_mut(), header).await?;
+                let mut read_moov = Mp4Box::read_data(reader.as_mut(), header, config.max_metadata_size).await?;
                 let moov_data = read_moov.data.parse()?;
                 log::info!("moov @ 0x{start_pos:08x}: {moov_data:#?}");
                 moov = Some(read_moov);
@@ -380,6 +460,36 @@ pub async fn sanitize_async<R: AsyncRead + AsyncSkip>(input: R) -> Result<Saniti
     }
 
     Ok(SanitizedMetadata { metadata: Some(metadata), data })
+}
+
+//
+// Config impls
+//
+
+impl Config {
+    /// Construct a builder for `Config`.
+    ///
+    /// See the documentation for [`ConfigBuilder`].
+    pub fn builder() -> ConfigBuilder {
+        ConfigBuilder::default()
+    }
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
+//
+// ConfigBuilder impls
+//
+
+impl ConfigBuilder {
+    /// Build a new [`Config`].
+    pub fn build(&self) -> Config {
+        self.try_build().unwrap()
+    }
 }
 
 //
@@ -588,6 +698,43 @@ mod test {
     fn box_size_overflow() {
         let test = test_mp4().mdat_data_len(u64::MAX - 16).build();
         sanitize(test).unwrap_err();
+    }
+
+    #[test]
+    fn ftyp_too_large() {
+        let mut compatible_brands = vec![];
+        while compatible_brands.len() * COMPATIBLE_BRAND.value.len() < MAX_FTYP_SIZE as usize {
+            compatible_brands.push(COMPATIBLE_BRAND);
+        }
+
+        let test = test_mp4()
+            .ftyp(test_ftyp().compatible_brands(compatible_brands).clone())
+            .build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.current_context(), ParseError::InvalidInput);
+        });
+    }
+
+    #[test]
+    fn max_moov_size() {
+        let test_spec = test_mp4().build_spec().unwrap();
+        let config = Config::builder()
+            .max_metadata_size(test_spec.moov().build().encoded_len())
+            .build();
+        test_spec.build().sanitize_ok_with_config(config);
+    }
+
+    #[test]
+    fn moov_too_large() {
+        let test_spec = test_mp4().build_spec().unwrap();
+        let config = Config::builder()
+            .max_metadata_size(test_spec.moov().build().data.encoded_len() - 1)
+            .build();
+        let test = test_spec.build();
+        test.sanitize_ok();
+        assert_matches!(sanitize_with_config(test, config).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.current_context(), ParseError::InvalidInput);
+        });
     }
 
     #[test]
