@@ -11,7 +11,7 @@ license = "MIT"
 categories = ["multimedia::video"]
 keywords = ["mp4", "sanitizer", "video", "media"]
 
-exclude = ["/.github", ".*"]
+exclude = ["/.github", ".*", "tests/test-data/"]
 
 [dependencies]
 bytes = "1.3.0"
