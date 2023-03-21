@@ -6,12 +6,12 @@ use bytes::{Buf, Bytes};
 use derive_builder::Builder;
 use mp4san_test::{verify_ffmpeg, verify_gpac};
 
-use crate::parse::box_type::{FREE, FTYP, MDAT, MOOV};
+use crate::parse::box_type::{FREE, FTYP, MDAT, MOOV, SKIP};
 use crate::parse::BoxType;
 use crate::{sanitize, sanitize_with_config, Config, InputSpan, SanitizedMetadata, Skip};
 
 use super::{
-    init_logger, sanitized_data, write_mdat_header, write_test_free, write_test_uuid, TestFtypBuilder, TestMoovBuilder,
+    init_logger, sanitized_data, write_mdat_header, write_test_box, write_test_uuid, TestFtypBuilder, TestMoovBuilder,
     TEST_UUID,
 };
 
@@ -93,14 +93,14 @@ impl TestMp4Spec {
                         None => mdat = Some(InputSpan { len: mdat_len, ..written_mdat }),
                     }
                 }
-                FREE => {
-                    let free_len = 13;
+                name @ (FREE | SKIP) => {
+                    let len = 13;
                     if let Some(mdat) = &mut mdat {
                         if data.len() as u64 == mdat.offset + mdat.len {
-                            mdat.len += free_len as u64;
+                            mdat.len += len as u64;
                         }
                     }
-                    write_test_free(&mut data, free_len);
+                    write_test_box(&mut data, name, len);
                 }
                 TEST_UUID => {
                     write_test_uuid(&mut data);
@@ -194,7 +194,7 @@ impl TestMp4 {
             return self.expected_metadata.clone();
         };
         let mut expected_metadata = self.expected_metadata.to_vec();
-        write_test_free(&mut expected_metadata, pad_len.get() as u32);
+        write_test_box(&mut expected_metadata, FREE, pad_len.get() as u32);
         expected_metadata.into()
     }
 }

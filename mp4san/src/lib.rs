@@ -311,9 +311,9 @@ pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(
             .map_eof(|_| Error::Parse(report_attach!(ParseError::TruncatedBox, "while parsing box header")))?;
 
         match header.box_type() {
-            BoxType::FREE => {
+            name @ (BoxType::FREE | BoxType::SKIP) => {
                 let box_size = skip_box(reader.as_mut(), &header).await? + header.encoded_len();
-                log::info!("free @ 0x{start_pos:08x}: {box_size} bytes");
+                log::info!("{name} @ 0x{start_pos:08x}: {box_size} bytes");
 
                 // Try to extend any already accumulated data in case there's more mdat boxes to come.
                 if let Some(data) = &mut data {
@@ -632,7 +632,7 @@ pub mod readme {}
 mod test {
     use assert_matches::assert_matches;
 
-    use crate::parse::box_type::{CO64, FREE, FTYP, MDAT, MDIA, MINF, MOOV, STBL, STCO, TRAK};
+    use crate::parse::box_type::{CO64, FREE, FTYP, MDAT, MDIA, MINF, MOOV, SKIP, STBL, STCO, TRAK};
     use crate::util::test::{
         init_logger, sanitized_data, test_ftyp, test_moov, test_mp4, write_test_mdat, ISOM, MP41, MP42, TEST_UUID,
     };
@@ -790,13 +790,13 @@ mod test {
 
     #[test]
     fn free_boxes_in_metadata() {
-        let test = test_mp4().boxes(&[FTYP, FREE, FREE, MDAT, MOOV, FREE][..]).build();
+        let test = test_mp4().boxes(&[FTYP, FREE, SKIP, MDAT, MOOV, FREE][..]).build();
         test.sanitize_ok();
     }
 
     #[test]
     fn free_boxes_after_mdat() {
-        let test = test_mp4().boxes(&[FTYP, MDAT, FREE, MOOV][..]).build();
+        let test = test_mp4().boxes(&[FTYP, MDAT, SKIP, FREE, MOOV][..]).build();
         test.sanitize_ok();
     }
 

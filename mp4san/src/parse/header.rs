@@ -233,6 +233,7 @@ box_type! {
     MINF,
     MOOV,
     MVHD,
+    SKIP,
     STBL,
     STCO,
     STSC,

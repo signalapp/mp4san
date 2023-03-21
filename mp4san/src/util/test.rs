@@ -6,7 +6,7 @@ use std::iter;
 
 use bytes::{BufMut, BytesMut};
 
-use crate::parse::box_type::{DINF, DREF, FREE, HDLR, MDAT, MDHD, METT, MVHD, STSC, STSD, STSZ, STTS, TKHD, URL};
+use crate::parse::box_type::{DINF, DREF, HDLR, MDAT, MDHD, METT, MVHD, STSC, STSD, STSZ, STTS, TKHD, URL};
 use crate::parse::{AnyMp4Box, BoxHeader, BoxType, BoxUuid, FourCC, FullBoxHeader, Mp4Box};
 use crate::{InputSpan, SanitizedMetadata};
 
@@ -132,10 +132,10 @@ pub fn write_test_dinf_data<B: BufMut>(mut out: B) {
     FullBoxHeader { version: 0, flags: 1 }.put_buf(&mut out);
 }
 
-pub fn write_test_free(mut out: &mut Vec<u8>, len: u32) {
-    const FREE_HEADER_SIZE: u32 = BoxHeader::with_u32_data_size(FREE, 0).encoded_len() as u32;
-    BoxHeader::with_u32_data_size(FREE, len - FREE_HEADER_SIZE).put_buf(&mut out);
-    out.extend(iter::repeat(0).take((len - FREE_HEADER_SIZE) as usize));
+pub fn write_test_box(mut out: &mut Vec<u8>, name: BoxType, len: u32) {
+    let header_size = BoxHeader::with_u32_data_size(name, 0).encoded_len() as u32;
+    BoxHeader::with_u32_data_size(name, len - header_size).put_buf(&mut out);
+    out.extend(iter::repeat(0).take((len - header_size) as usize));
 }
 
 pub fn write_test_mdat(out: &mut Vec<u8>, data: &[u8]) -> InputSpan {
