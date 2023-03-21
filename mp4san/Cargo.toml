@@ -11,6 +11,7 @@ license = "MIT"
 categories = ["multimedia::video"]
 keywords = ["mp4", "sanitizer", "video", "media"]
 
+readme = "../README.md"
 exclude = ["/.github", ".*", "tests/test-data/"]
 
 [dependencies]
