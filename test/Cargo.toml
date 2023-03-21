@@ -3,6 +3,8 @@ name = "mp4san-test"
 edition = "2021"
 version = "0.1.0"
 
+publish = false
+
 [features]
 default = []
 ffmpeg = ["dep:ac-ffmpeg", "dep:bindgen", "dep:cc", "dep:ffmpeg-sys-next"]

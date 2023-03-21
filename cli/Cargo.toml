@@ -3,6 +3,8 @@ name = "mp4san-cli"
 edition = "2021"
 version = "0.1.0"
 
+publish = false
+
 [dependencies]
 anyhow = "1.0.68"
 clap = { version = "4.0.32", features = ["derive"] }
