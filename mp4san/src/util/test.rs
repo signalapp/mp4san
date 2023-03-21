@@ -6,7 +6,7 @@ use std::iter;
 
 use bytes::{BufMut, BytesMut};
 
-use crate::parse::box_type::{DINF, DREF, HDLR, MDAT, MDHD, METT, MVHD, STSC, STSD, STSZ, STTS, TKHD, URL};
+use crate::parse::box_type::{DINF, DREF, HDLR, MDAT, MDHD, MECO, META, METT, MVHD, STSC, STSD, STSZ, STTS, TKHD, URL};
 use crate::parse::{AnyMp4Box, BoxHeader, BoxType, BoxUuid, FourCC, FullBoxHeader, Mp4Box};
 use crate::{InputSpan, SanitizedMetadata};
 
@@ -44,6 +44,12 @@ pub fn test_dinf() -> AnyMp4Box {
     Mp4Box::with_bytes(DINF, data)
 }
 
+pub fn test_free(name: BoxType, len: u32) -> AnyMp4Box {
+    let header_size = BoxHeader::with_u32_data_size(name, 0).encoded_len() as u32;
+    let data = iter::repeat(0).take((len - header_size) as usize).collect();
+    Mp4Box::with_bytes(name, data)
+}
+
 pub fn test_ftyp() -> TestFtypBuilder {
     Default::default()
 }
@@ -58,6 +64,18 @@ pub fn test_mdhd() -> AnyMp4Box {
     let mut data = BytesMut::new();
     write_test_mdhd_data(&mut data);
     Mp4Box::with_bytes(MDHD, data)
+}
+
+pub fn test_meco() -> AnyMp4Box {
+    let mut data = BytesMut::new();
+    write_test_meco_data(&mut data);
+    Mp4Box::with_bytes(MECO, data)
+}
+
+pub fn test_meta() -> AnyMp4Box {
+    let mut data = BytesMut::new();
+    write_test_meta_data(&mut data);
+    Mp4Box::with_bytes(META, data)
 }
 
 pub fn test_moov() -> TestMoovBuilder {
@@ -132,17 +150,20 @@ pub fn write_test_dinf_data<B: BufMut>(mut out: B) {
     FullBoxHeader { version: 0, flags: 1 }.put_buf(&mut out);
 }
 
-pub fn write_test_box(mut out: &mut Vec<u8>, name: BoxType, len: u32) {
-    let header_size = BoxHeader::with_u32_data_size(name, 0).encoded_len() as u32;
-    BoxHeader::with_u32_data_size(name, len - header_size).put_buf(&mut out);
-    out.extend(iter::repeat(0).take((len - header_size) as usize));
-}
-
 pub fn write_test_mdat(out: &mut Vec<u8>, data: &[u8]) -> InputSpan {
     let mut span = write_mdat_header(out, Some(data.len() as u64));
     out.extend_from_slice(data);
     span.len += data.len() as u64;
     span
+}
+
+pub fn write_test_meco_data<B: BufMut>(mut out: B) {
+    test_meta().put_buf(&mut out);
+}
+
+pub fn write_test_meta_data<B: BufMut>(mut out: B) {
+    FullBoxHeader::default().put_buf(&mut out);
+    test_hdlr(FourCC::META).put_buf(&mut out);
 }
 
 pub fn write_test_mdhd_data<B: BufMut>(mut out: B) {

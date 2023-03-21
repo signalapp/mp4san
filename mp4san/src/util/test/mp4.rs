@@ -6,13 +6,13 @@ use bytes::{Buf, Bytes};
 use derive_builder::Builder;
 use mp4san_test::{verify_ffmpeg, verify_gpac};
 
-use crate::parse::box_type::{FREE, FTYP, MDAT, MOOV, SKIP};
+use crate::parse::box_type::{FREE, FTYP, MDAT, MECO, META, MOOV, SKIP};
 use crate::parse::BoxType;
 use crate::{sanitize, sanitize_with_config, Config, InputSpan, SanitizedMetadata, Skip};
 
 use super::{
-    init_logger, sanitized_data, write_mdat_header, write_test_box, write_test_uuid, TestFtypBuilder, TestMoovBuilder,
-    TEST_UUID,
+    init_logger, sanitized_data, test_free, test_meco, test_meta, write_mdat_header, write_test_uuid, TestFtypBuilder,
+    TestMoovBuilder, TEST_UUID,
 };
 
 #[derive(Builder)]
@@ -93,14 +93,19 @@ impl TestMp4Spec {
                         None => mdat = Some(InputSpan { len: mdat_len, ..written_mdat }),
                     }
                 }
-                name @ (FREE | SKIP) => {
-                    let len = 13;
+                name @ (FREE | META | MECO | SKIP) => {
+                    let mp4_box = match name {
+                        FREE | SKIP => test_free(name, 13),
+                        META => test_meta(),
+                        MECO => test_meco(),
+                        _ => unreachable!(),
+                    };
                     if let Some(mdat) = &mut mdat {
                         if data.len() as u64 == mdat.offset + mdat.len {
-                            mdat.len += len as u64;
+                            mdat.len += mp4_box.encoded_len();
                         }
-                    }
-                    write_test_box(&mut data, name, len);
+                    };
+                    mp4_box.put_buf(&mut data);
                 }
                 TEST_UUID => {
                     write_test_uuid(&mut data);
@@ -194,7 +199,7 @@ impl TestMp4 {
             return self.expected_metadata.clone();
         };
         let mut expected_metadata = self.expected_metadata.to_vec();
-        write_test_box(&mut expected_metadata, FREE, pad_len.get() as u32);
+        test_free(FREE, pad_len.get() as u32).put_buf(&mut expected_metadata);
         expected_metadata.into()
     }
 }

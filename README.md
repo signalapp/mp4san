@@ -4,18 +4,18 @@ A Rust MP4 format "sanitizer".
 
 Currently the sanitizer is capable of:
 
-- Returning all metadata present in the input as a self-contained contiguous byte array.
+- Returning all presentation metadata present in the input as a self-contained contiguous byte array.
 - Finding and returning a pointer to the span in the input containing the (contiguous) media data.
 
-"Self-contained and contiguous" metadata means that the metadata can be concatenated with the media data to form a valid
-MP4 file.
+"Presentation" metadata means any metadata which is required by an MP4 player to play the file. "Self-contained and
+contiguous" means that the returned metadata can be concatenated with the media data to form a valid MP4 file.
 
 ## Unsupported MP4 features
 
 The sanitizer does not currently support:
 
 - "Fragmented" MP4 files, which are mostly used for adaptive-bitrate streaming.
-- Discontiguous media data, i.e. media data (`mdat`) boxes interspersed with the presentation metadata (`moov`) box.
+- Discontiguous media data, i.e. media data (`mdat`) boxes interspersed with presentation metadata (`moov`).
 - Media data references (`dref`) pointing to separate files.
 - Any similar format, e.g. Quicktime File Format (`mov`) or the legacy MP4 version 1, which does not contain the `isom`
   compatible brand in its file type header (`ftyp`).

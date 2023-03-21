@@ -228,6 +228,7 @@ box_type! {
     MDAT,
     MDHD,
     MDIA,
+    MECO,
     META,
     METT,
     MINF,

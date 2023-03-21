@@ -4,11 +4,11 @@
 //!
 //! Currently the sanitizer always performs the following functions:
 //!
-//! - Return all metadata present in the input as a self-contained contiguous byte array.
+//! - Return all presentation metadata present in the input as a self-contained contiguous byte array.
 //! - Find and return a pointer to the span in the input containing the (contiguous) media data.
 //!
-//! "Self-contained and contiguous" metadata means that the metadata can be concatenated with the media data to form a
-//! valid MP4 file.
+//! "Presentation" metadata means any metadata which is required by an MP4 player to play the file. "Self-contained and
+//! contiguous" means that the returned metadata can be concatenated with the media data to form a valid MP4 file.
 //!
 //! The original metadata may or may not need to be modified in order to perform these functions. In the case that the
 //! original metadata does not need to be modified, the returned [`SanitizedMetadata::metadata`] will be [`None`] to
@@ -19,7 +19,7 @@
 //! The sanitizer does not currently support:
 //!
 //! - "Fragmented" MP4 files, which are mostly used for adaptive-bitrate streaming.
-//! - Discontiguous media data, i.e. media data (`mdat`) boxes interspersed with the presentation metadata (`moov`) box.
+//! - Discontiguous media data, i.e. media data (`mdat`) boxes interspersed with presentation metadata (`moov`).
 //! - Media data references (`dref`) pointing to separate files.
 //! - Any similar format, e.g. Quicktime File Format (`mov`) or the legacy MP4 version 1, which does not contain the
 //!   [`isom` compatible brand](COMPATIBLE_BRAND) in its file type header (`ftyp`).
@@ -364,6 +364,7 @@ pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(
                     data = Some(InputSpan { offset: start_pos, len: box_size });
                 }
             }
+
             BoxType::MOOV => {
                 let mut read_moov = Mp4Box::read_data(reader.as_mut(), header, config.max_metadata_size).await?;
                 let moov_data = read_moov.data.parse()?;
@@ -371,6 +372,19 @@ pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(
                 moov = Some(read_moov);
                 moov_offset = Some(start_pos);
             }
+
+            name @ (BoxType::META | BoxType::MECO) => {
+                let box_size = skip_box(reader.as_mut(), &header).await? + header.encoded_len();
+                log::info!("{name} @ 0x{start_pos:08x}: {box_size} bytes");
+
+                // Try to extend any already accumulated data in case there's more mdat boxes to come.
+                if let Some(data) = &mut data {
+                    if data.offset + data.len == start_pos {
+                        data.len += box_size;
+                    }
+                }
+            }
+
             name => {
                 let box_size = skip_box(reader.as_mut(), &header).await? + header.encoded_len();
                 log::info!("{name} @ 0x{start_pos:08x}: {box_size} bytes");
@@ -632,7 +646,7 @@ pub mod readme {}
 mod test {
     use assert_matches::assert_matches;
 
-    use crate::parse::box_type::{CO64, FREE, FTYP, MDAT, MDIA, MINF, MOOV, SKIP, STBL, STCO, TRAK};
+    use crate::parse::box_type::{CO64, FREE, FTYP, MDAT, MDIA, MECO, META, MINF, MOOV, SKIP, STBL, STCO, TRAK};
     use crate::util::test::{
         init_logger, sanitized_data, test_ftyp, test_moov, test_mp4, write_test_mdat, ISOM, MP41, MP42, TEST_UUID,
     };
@@ -797,6 +811,18 @@ mod test {
     #[test]
     fn free_boxes_after_mdat() {
         let test = test_mp4().boxes(&[FTYP, MDAT, SKIP, FREE, MOOV][..]).build();
+        test.sanitize_ok();
+    }
+
+    #[test]
+    fn meta_boxes_in_metadata() {
+        let test = test_mp4().boxes(&[FTYP, MDAT, MOOV, META, MECO][..]).build();
+        test.sanitize_ok();
+    }
+
+    #[test]
+    fn meta_boxes_after_mdat() {
+        let test = test_mp4().boxes(&[FTYP, MDAT, META, MDAT, MECO, MOOV][..]).build();
         test.sanitize_ok();
     }
 
