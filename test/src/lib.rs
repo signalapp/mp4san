@@ -13,7 +13,7 @@ mod gpac;
 #[cfg_attr(not(feature = "ffmpeg"), allow(unused_variables))]
 pub fn verify_ffmpeg(data: &[u8], expected_mdat_data: &[u8]) {
     #[cfg(not(feature = "ffmpeg"))]
-    log::info!("not verifying sanitizer output using ffmpeg; ffmpeg-tests feature disabled");
+    log::info!("not verifying sanitizer output using ffmpeg; ffmpeg feature disabled");
     #[cfg(feature = "ffmpeg")]
     ffmpeg::verify_ffmpeg(data, expected_mdat_data);
 }
@@ -22,7 +22,7 @@ pub fn verify_ffmpeg(data: &[u8], expected_mdat_data: &[u8]) {
 #[cfg_attr(not(feature = "gpac"), allow(unused_variables))]
 pub fn verify_gpac(data: &[u8], expected_mdat_data: &[u8]) {
     #[cfg(not(feature = "gpac"))]
-    log::info!("not verifying sanitizer output using gpac; gpac-tests feature disabled");
+    log::info!("not verifying sanitizer output using gpac; gpac feature disabled");
     #[cfg(feature = "gpac")]
     gpac::verify_gpac(data, expected_mdat_data);
 }

@@ -58,9 +58,10 @@ existing issues before [submitting a new one](https://github.com/privacyresearch
 
 ## Testing
 
-FFMpeg and GPAC-based verification of mp4san output can be enabled using the features `ffmpeg-tests` and `gpac-tests`.
+FFMpeg and GPAC-based verification of mp4san output can be enabled using the features `mp4san-test/ffmpeg` and
+`mp4san-test/gpac`.
 
-The `ffmpeg-tests` feature requires the following FFMpeg libraries and their headers to be installed:
+The `mp4san-test/ffmpeg` feature requires the following FFMpeg libraries and their headers to be installed:
 
 - `libavcodec`
 - `libavformat`
@@ -68,7 +69,7 @@ The `ffmpeg-tests` feature requires the following FFMpeg libraries and their hea
 - `libswresample`
 - `libswscale`
 
-The `gpac-tests` feature requires `libgpac >= 2.2` and its headers to be installed.
+The `mp4san-test/gpac` feature requires `libgpac >= 2.2` and its headers to be installed.
 
 Integration tests on sample data files can be processed through `mp4san-test-gen` before being added to the
 `mp4san-test-data` repo. This removes any actual media data from the sample file, since it's not read by `mp4san`
