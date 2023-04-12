@@ -65,8 +65,8 @@ use std::task::{ready, Context, Poll};
 use derive_builder::Builder;
 use derive_more::Display;
 use error_stack::Report;
-use futures::io::BufReader;
-use futures::{pin_mut, AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncSeek};
+use futures_util::io::BufReader;
+use futures_util::{pin_mut, AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncSeek};
 
 use crate::parse::error::{MultipleBoxes, WhileParsingBox};
 use crate::parse::{BoxHeader, BoxType, FourCC, FtypBox, MoovBox, Mp4Box, ParseError, StblCoMut};
@@ -237,13 +237,13 @@ pub fn sanitize_with_config<R: Read + Skip + Unpin>(input: R, config: Config) ->
 /// # use mp4san_test::{example_ftyp, example_mdat, example_moov};
 /// #
 /// # fn main() -> Result<(), mp4san::Error> {
-/// #     futures::FutureExt::now_or_never(run()).unwrap()
+/// #     futures_util::FutureExt::now_or_never(run()).unwrap()
 /// # }
 /// #
 /// # async fn run() -> Result<(), mp4san::Error> {
 /// let example_input = [example_ftyp(), example_mdat(), example_moov()].concat();
 ///
-/// let sanitized = sanitize_async(futures::io::Cursor::new(example_input)).await?;
+/// let sanitized = sanitize_async(futures_util::io::Cursor::new(example_input)).await?;
 ///
 /// assert_eq!(sanitized.metadata, Some([example_ftyp(), example_moov()].concat()));
 /// assert_eq!(sanitized.data.offset, example_ftyp().len() as u64);
@@ -272,14 +272,14 @@ pub async fn sanitize_async<R: AsyncRead + AsyncSkip>(input: R) -> Result<Saniti
 /// # use mp4san_test::{example_ftyp, example_mdat, example_moov};
 /// #
 /// # fn main() -> Result<(), mp4san::Error> {
-/// #     futures::FutureExt::now_or_never(run()).unwrap()
+/// #     futures_util::FutureExt::now_or_never(run()).unwrap()
 /// # }
 /// #
 /// # async fn run() -> Result<(), mp4san::Error> {
 /// let example_input = [example_ftyp(), example_mdat(), example_moov()].concat();
 ///
 /// let config = Config::builder().max_metadata_size(example_moov().len() as u64).build();
-/// let sanitized = sanitize_async_with_config(futures::io::Cursor::new(example_input), config).await?;
+/// let sanitized = sanitize_async_with_config(futures_util::io::Cursor::new(example_input), config).await?;
 ///
 /// assert_eq!(sanitized.metadata, Some([example_ftyp(), example_moov()].concat()));
 /// assert_eq!(sanitized.data.offset, example_ftyp().len() as u64);

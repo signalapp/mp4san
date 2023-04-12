@@ -5,7 +5,7 @@ use std::mem::size_of;
 use bytes::{Buf, BufMut};
 use derive_more::{Display, From};
 use error_stack::Result;
-use futures::{pin_mut, AsyncRead, AsyncReadExt, FutureExt};
+use futures_util::{pin_mut, AsyncRead, AsyncReadExt, FutureExt};
 
 use crate::sync::buf_async_reader;
 

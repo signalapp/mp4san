@@ -3,7 +3,7 @@ use std::io;
 
 use bytes::{Buf, BufMut};
 use error_stack::Result;
-use futures::{pin_mut, AsyncRead, AsyncReadExt};
+use futures_util::{pin_mut, AsyncRead, AsyncReadExt};
 
 use super::error::ParseResultExt;
 use super::integers::Mpeg4IntWriterExt;

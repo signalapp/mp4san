@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use bytes::Buf;
-use futures::{AsyncRead, FutureExt};
+use futures_util::{AsyncRead, FutureExt};
 
 use crate::{sanitize_async_with_config, AsyncSkip, Config, Error, SanitizedMetadata, Skip};
 
