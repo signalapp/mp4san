@@ -5,6 +5,16 @@ defaults:
   run:
     shell: bash
 jobs:
+  format-check:
+    name: format-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v3
+
+      - name: cargo fmt --check
+        run:  cargo fmt --check
+
   build-and-test:
     name: build-and-test
     runs-on: ubuntu-latest
@@ -63,12 +73,30 @@ jobs:
         with:
           token: ${{ github.token }}
 
-  format-check:
-    name: format-check
+  build-nightly:
+    name: check-nightly
     runs-on: ubuntu-latest
     steps:
       - name: checkout
         uses: actions/checkout@v3
 
-      - name: cargo fmt --check
-        run:  cargo fmt --check
+      - name: install latest rust nightly toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+            toolchain: nightly
+
+      - name: cache cargo output
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-nightly-${{ hashFiles('Cargo.lock') }}
+
+      - name: cargo +nightly check --no-default-features
+        run:  cargo +nightly check --no-default-features --verbose
+
+      - name: cargo +nightly check
+        run:  cargo +nightly check --verbose
