@@ -65,6 +65,10 @@ impl<T> CoBox<T> {
             .chunks_exact_mut(size_of::<T>())
             .map(|data| CoEntry { data, _t: PhantomData })
     }
+
+    pub fn entry_count(&self) -> u32 {
+        (self.entries.len() / size_of::<T>()) as u32
+    }
 }
 
 impl<T: Clone + Debug + 'static> ParsedBox for CoBox<T> {
@@ -74,7 +78,7 @@ impl<T: Clone + Debug + 'static> ParsedBox for CoBox<T> {
 
     fn put_buf(&self, buf: &mut dyn BufMut) {
         Self::FULL_BOX_HEADER.put_buf(&mut *buf);
-        buf.put_u32((self.entries.len() / size_of::<T>()).try_into().unwrap());
+        buf.put_u32((self.entry_count()).try_into().unwrap());
         buf.put_slice(&self.entries[..])
     }
 }

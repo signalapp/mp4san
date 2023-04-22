@@ -26,6 +26,10 @@ impl StcoBox {
     pub fn entries_mut(&mut self) -> impl Iterator<Item = StcoEntry<'_>> + ExactSizeIterator + '_ {
         self.inner.entries_mut().map(|inner| StcoEntry { inner })
     }
+
+    pub fn entry_count(&self) -> u32 {
+        self.inner.entry_count()
+    }
 }
 
 impl ParseBox for StcoBox {

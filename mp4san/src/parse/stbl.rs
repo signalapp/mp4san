@@ -71,3 +71,16 @@ impl ParsedBox for StblBox {
         self.children.put_buf(buf)
     }
 }
+
+//
+// StblCoMut impls
+//
+
+impl StblCoMut<'_> {
+    pub fn entry_count(&self) -> u32 {
+        match self {
+            StblCoMut::Stco(stco) => stco.entry_count(),
+            StblCoMut::Co64(co64) => co64.entry_count(),
+        }
+    }
+}

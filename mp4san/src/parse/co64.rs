@@ -26,6 +26,10 @@ impl Co64Box {
     pub fn entries_mut(&mut self) -> impl Iterator<Item = Co64Entry<'_>> + ExactSizeIterator + '_ {
         self.inner.entries_mut().map(|inner| Co64Entry { inner })
     }
+
+    pub fn entry_count(&self) -> u32 {
+        self.inner.entry_count()
+    }
 }
 
 impl ParseBox for Co64Box {

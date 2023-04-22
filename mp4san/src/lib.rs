@@ -331,7 +331,9 @@ pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(
                 );
                 let mut read_ftyp = Mp4Box::read_data(reader.as_mut(), header, MAX_FTYP_SIZE).await?;
                 let ftyp_data: &mut FtypBox = read_ftyp.data.parse()?;
-                log::info!("ftyp @ 0x{start_pos:08x}: {ftyp_data:#?}");
+                let compatible_brand_count = ftyp_data.compatible_brands().len();
+                let FtypBox { major_brand, minor_version, .. } = ftyp_data;
+                log::info!("ftyp @ 0x{start_pos:08x}: {major_brand} version {minor_version}, {compatible_brand_count} compatible brands");
 
                 if !ftyp_data.compatible_brands().any(|b| b == COMPATIBLE_BRAND) {
                     return Err(report!(ParseError::UnsupportedFormat(ftyp_data.major_brand)).into());
@@ -367,8 +369,15 @@ pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(
 
             BoxType::MOOV => {
                 let mut read_moov = Mp4Box::read_data(reader.as_mut(), header, config.max_metadata_size).await?;
-                let moov_data = read_moov.data.parse()?;
-                log::info!("moov @ 0x{start_pos:08x}: {moov_data:#?}");
+
+                let moov_data: &mut MoovBox = read_moov.data.parse()?;
+                let trak_chunk_counts = moov_data
+                    .traks()
+                    .map(|trak| Ok::<_, Report<_>>(trak?.co_mut()?.entry_count()));
+                let chunk_count = trak_chunk_counts.reduce(|a, b| Ok(a? + b?)).unwrap_or(Ok(0))?;
+                let trak_count = moov_data.traks().count();
+
+                log::info!("moov @ 0x{start_pos:08x}: {trak_count} traks {chunk_count} chunks");
                 moov = Some(read_moov);
                 moov_offset = Some(start_pos);
             }
@@ -442,7 +451,7 @@ pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(
             log::info!("metadata: 0x{metadata_len:08x} bytes; displacing chunk offsets by 0x{mdat_displacement:08x}");
 
             for trak in &mut moov.data.parse()?.traks() {
-                let co = trak?.mdia_mut()?.minf_mut()?.stbl_mut()?.co_mut()?;
+                let co = trak?.co_mut()?;
                 if let StblCoMut::Stco(stco) = co {
                     for mut entry in &mut stco.entries_mut() {
                         entry.set(
