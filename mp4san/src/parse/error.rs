@@ -1,6 +1,5 @@
 use std::any::type_name;
 use std::fmt::{Debug, Display};
-use std::io;
 
 use derive_more::Display;
 
@@ -9,39 +8,39 @@ use super::{BoxType, FourCC};
 /// Error type returned by the MP4 parser.
 ///
 /// While the API of this error type is currently considered unstable, it is more stably guaranteed to implement
-/// [`Display`] + [`Debug`] + [`Error`](std::error::Error).
+/// [`Display`] + [`Debug`].
 #[allow(missing_docs)]
-#[derive(Clone, Debug, thiserror::Error)]
+#[derive(Clone, Debug, derive_more::Display)]
 pub enum ParseError {
     /// The input is invalid because its boxes are in a ordering or configuration disallowed by the ISO specification.
-    #[error("Invalid box layout")]
+    #[display(fmt = "Invalid box layout")]
     InvalidBoxLayout,
 
     /// The input is invalid.
-    #[error("Invalid input")]
+    #[display(fmt = "Invalid input")]
     InvalidInput,
 
     /// The input is invalid because it is missing a box required by the ISO specification.
-    #[error("Missing required `{0}` box")]
+    #[display(fmt = "Missing required `{_0}` box")]
     MissingRequiredBox(BoxType),
 
     /// The input is invalid because the input ended before the end of a box.
     ///
     /// This can occur either when the entire input is truncated or when a box size is incorrect.
-    #[error("Truncated box")]
+    #[display(fmt = "Truncated box")]
     TruncatedBox,
 
     /// The input is unsupported because it contains an unknown box.
-    #[error("Unsupported box `{0}`")]
+    #[display(fmt = "Unsupported box `{_0}`")]
     UnsupportedBox(BoxType),
 
     /// The input is unsupported because its boxes are in an unsupported ordering.
-    #[error("Unsupported box layout")]
+    #[display(fmt = "Unsupported box layout")]
     UnsupportedBoxLayout,
 
     /// The input is unsupported because it doesn't contain [`COMPATIBLE_BRAND`](crate::COMPATIBLE_BRAND) in its file
     /// type header (`ftyp`).
-    #[error("Unsupported format `{0}`")]
+    #[display(fmt = "Unsupported format `{_0}`")]
     UnsupportedFormat(FourCC),
 }
 
@@ -100,19 +99,6 @@ pub(crate) struct WhileParsingChild(pub(crate) BoxType, pub(crate) BoxType);
 #[display(fmt = "where `{} = {}`", _0, _1)]
 pub(crate) struct WhereEq<T, U>(pub(crate) T, pub(crate) U);
 
-impl From<ParseError> for io::Error {
-    fn from(from: ParseError) -> Self {
-        use ParseError::*;
-        match from {
-            err @ (InvalidBoxLayout { .. }
-            | UnsupportedBox { .. }
-            | UnsupportedBoxLayout { .. }
-            | MissingRequiredBox { .. }
-            | UnsupportedFormat { .. }
-            | TruncatedBox { .. }) => io::Error::new(io::ErrorKind::InvalidData, err),
-            err @ InvalidInput { .. } => io::Error::new(io::ErrorKind::InvalidInput, err),
-        }
-    }
-}
-
 impl<T: error_stack::ResultExt> ParseResultExt for T {}
+
+impl error_stack::Context for ParseError {}
