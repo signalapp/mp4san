@@ -95,8 +95,5 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-nightly-${{ hashFiles('Cargo.lock') }}
 
-      - name: cargo +nightly check --no-default-features
-        run:  cargo +nightly check --no-default-features --verbose
-
       - name: cargo +nightly check
         run:  cargo +nightly check --verbose
