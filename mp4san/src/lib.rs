@@ -52,6 +52,7 @@ extern crate error_stack;
 #[macro_use]
 mod macros;
 
+pub mod error;
 pub mod parse;
 mod sync;
 mod util;
@@ -76,6 +77,8 @@ use crate::util::{checked_add_signed, IoResultExt};
 // public types
 //
 
+pub use error::Error;
+
 #[derive(Builder, Clone)]
 #[builder(build_fn(name = "try_build"))]
 /// Configuration for the MP4 sanitizer.
@@ -87,23 +90,6 @@ pub struct Config {
     /// The default is 1 GiB.
     #[builder(default = "1024 * 1024 * 1024")]
     pub max_metadata_size: u64,
-}
-
-/// Error type returned by `mp4san`.
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    /// An IO error occurred while reading the given input.
-    #[error("IO error: {0}")]
-    Io(#[from] io::Error),
-
-    /// The input could not be parsed as an MP4 file.
-    ///
-    /// This type of error contains an [`error_stack::Report`] which can be used to identify exactly where in the parser
-    /// the error occurred. The [`Display`](std::fmt::Display) implementation, for example, will print a human-readable
-    /// parser stack trace. The underlying [`ParseError`] cause can also be retrieved e.g. for matching against with
-    /// [`Report::current_context`].
-    #[error("Parse error: {0}")]
-    Parse(Report<ParseError>),
 }
 
 /// Sanitized metadata returned by the sanitizer.
@@ -635,16 +621,6 @@ async fn stream_position<R: AsyncRead + AsyncSkip>(mut reader: Pin<&mut BufReade
 
 async fn stream_len<R: AsyncRead + AsyncSkip>(mut reader: Pin<&mut BufReader<R>>) -> io::Result<u64> {
     poll_fn(|cx| reader.as_mut().get_pin_mut().poll_stream_len(cx)).await
-}
-
-//
-// Error impls
-//
-
-impl From<Report<ParseError>> for Error {
-    fn from(from: Report<ParseError>) -> Self {
-        Self::Parse(from)
-    }
 }
 
 #[cfg(doctest)]
