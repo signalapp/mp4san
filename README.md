@@ -51,13 +51,6 @@ types.
 [`Seek`]: https://doc.rust-lang.org/std/io/trait.Seek.html
 [`parse`]: https://privacyresearchgroup.github.io/mp4san/public/mp4san/parse/index.html
 
-## Crate Features
-
-This crate has the following optional features:
-
-- `error-stack-std` enables the `std` feature of `error-stack`. This can only be disabled on a nightly Rust toolchain,
-  which is useful to disable some optional features of `error-stack`, but should always remain enabled otherwise.
-
 ## Contributing Bug Reports
 
 GitHub is the project's bug tracker. Please [search](https://github.com/privacyresearchgroup/mp4san/issues) for similar
