@@ -51,7 +51,7 @@ jobs:
         run:  cargo build --verbose
 
       - name: install libav libraries for ffmpeg tests
-        run:  sudo apt-get install -y libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev
+        run:  sudo apt-get install --no-install-recommends -y libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev
 
       - name: install gpac libraries for gpac tests
         run: |
