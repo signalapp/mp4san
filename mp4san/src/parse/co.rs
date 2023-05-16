@@ -3,7 +3,8 @@ use std::marker::PhantomData;
 use std::mem::{size_of, take};
 
 use bytes::{BufMut, BytesMut};
-use error_stack::Result;
+
+use crate::error::Result;
 
 use super::error::WhileParsingField;
 use super::{BoxType, FullBoxHeader, Mpeg4Int, Mpeg4IntWriterExt, ParseError, ParsedBox};

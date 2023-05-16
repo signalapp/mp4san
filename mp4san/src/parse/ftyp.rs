@@ -3,7 +3,8 @@
 use std::mem::size_of;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use error_stack::Result;
+
+use crate::error::Result;
 
 use super::error::{ParseResultExt, WhereEq, WhileParsingField};
 use super::mp4box::ParsedBox;

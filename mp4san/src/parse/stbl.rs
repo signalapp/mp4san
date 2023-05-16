@@ -1,7 +1,8 @@
 #![allow(missing_docs)]
 
 use bytes::{BufMut, BytesMut};
-use error_stack::Result;
+
+use crate::error::Result;
 
 use super::error::{ParseResultExt, WhileParsingChild};
 use super::mp4box::{Boxes, ParseBox};

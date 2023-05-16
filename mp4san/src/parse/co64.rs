@@ -1,7 +1,8 @@
 #![allow(missing_docs)]
 
 use bytes::{BufMut, BytesMut};
-use error_stack::Result;
+
+use crate::error::Result;
 
 use super::co::{CoBox, CoEntry};
 use super::{BoxType, ParseBox, ParseError, ParsedBox};

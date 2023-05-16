@@ -1,7 +1,8 @@
 #![allow(missing_docs)]
 
 use bytes::{BufMut, BytesMut};
-use error_stack::Result;
+
+use crate::error::Result;
 
 use super::error::{ParseResultExt, WhileParsingField};
 use super::mp4box::Boxes;
@@ -79,7 +80,7 @@ mod test {
         MoovBox::with_children(vec![]).put_buf(&mut data);
         let err = MoovBox::parse(&mut data).unwrap_err();
         assert!(
-            matches!(err.current_context(), ParseError::MissingRequiredBox(BoxType::TRAK)),
+            matches!(err.get_ref(), ParseError::MissingRequiredBox(BoxType::TRAK)),
             "{err}",
         );
     }

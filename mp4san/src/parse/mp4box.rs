@@ -10,10 +10,10 @@ use derive_more::From;
 use derive_where::derive_where;
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clonable::clonable;
-use error_stack::Result;
 use futures_util::io::BufReader;
 use futures_util::{AsyncRead, AsyncReadExt};
 
+use crate::error::Result;
 use crate::util::IoResultExt;
 use crate::{stream_len, stream_position, AsyncSkip, BoxDataTooLarge, Error};
 

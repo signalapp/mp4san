@@ -2,8 +2,9 @@ use std::fmt;
 use std::io;
 
 use bytes::{Buf, BufMut};
-use error_stack::Result;
 use futures_util::{pin_mut, AsyncRead, AsyncReadExt};
+
+use crate::error::Result;
 
 use super::error::ParseResultExt;
 use super::integers::Mpeg4IntWriterExt;

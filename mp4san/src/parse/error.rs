@@ -3,6 +3,8 @@ use std::fmt::{Debug, Display};
 
 use derive_more::Display;
 
+use crate::error::{Result, ResultExt};
+
 use super::{BoxType, FourCC};
 
 /// Error type returned by the MP4 parser.
@@ -10,41 +12,41 @@ use super::{BoxType, FourCC};
 /// While the API of this error type is currently considered unstable, it is more stably guaranteed to implement
 /// [`Display`] + [`Debug`].
 #[allow(missing_docs)]
-#[derive(Clone, Debug, derive_more::Display)]
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum ParseError {
     /// The input is invalid because its boxes are in a ordering or configuration disallowed by the ISO specification.
-    #[display(fmt = "Invalid box layout")]
+    #[error("Invalid box layout")]
     InvalidBoxLayout,
 
     /// The input is invalid.
-    #[display(fmt = "Invalid input")]
+    #[error("Invalid input")]
     InvalidInput,
 
     /// The input is invalid because it is missing a box required by the ISO specification.
-    #[display(fmt = "Missing required `{_0}` box")]
+    #[error("Missing required `{_0}` box")]
     MissingRequiredBox(BoxType),
 
     /// The input is invalid because the input ended before the end of a box.
     ///
     /// This can occur either when the entire input is truncated or when a box size is incorrect.
-    #[display(fmt = "Truncated box")]
+    #[error("Truncated box")]
     TruncatedBox,
 
     /// The input is unsupported because it contains an unknown box.
-    #[display(fmt = "Unsupported box `{_0}`")]
+    #[error("Unsupported box `{_0}`")]
     UnsupportedBox(BoxType),
 
     /// The input is unsupported because its boxes are in an unsupported ordering.
-    #[display(fmt = "Unsupported box layout")]
+    #[error("Unsupported box layout")]
     UnsupportedBoxLayout,
 
     /// The input is unsupported because it doesn't contain [`COMPATIBLE_BRAND`](crate::COMPATIBLE_BRAND) in its file
     /// type header (`ftyp`).
-    #[display(fmt = "Unsupported format `{_0}`")]
+    #[error("Unsupported format `{_0}`")]
     UnsupportedFormat(FourCC),
 }
 
-pub(crate) trait ParseResultExt: error_stack::ResultExt + Sized {
+pub(crate) trait ParseResultExt: ResultExt + Sized {
     fn while_parsing_type<T>(self) -> Self {
         self.attach_printable(WhileParsingType(type_name::<T>()))
     }
@@ -99,6 +101,4 @@ pub(crate) struct WhileParsingChild(pub(crate) BoxType, pub(crate) BoxType);
 #[display(fmt = "where `{} = {}`", _0, _1)]
 pub(crate) struct WhereEq<T, U>(pub(crate) T, pub(crate) U);
 
-impl<T: error_stack::ResultExt> ParseResultExt for T {}
-
-impl error_stack::Context for ParseError {}
+impl<T, E> ParseResultExt for Result<T, E> {}

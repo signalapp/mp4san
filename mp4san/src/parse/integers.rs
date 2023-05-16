@@ -4,7 +4,8 @@ use std::mem::size_of;
 
 use bytes::Buf;
 use bytes::BufMut;
-use error_stack::Result;
+
+use crate::error::Result;
 
 use super::error::WhileParsingType;
 use super::ParseError;

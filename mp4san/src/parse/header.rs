@@ -4,9 +4,9 @@ use std::mem::size_of;
 
 use bytes::{Buf, BufMut};
 use derive_more::{Display, From};
-use error_stack::Result;
 use futures_util::{pin_mut, AsyncRead, AsyncReadExt, FutureExt};
 
+use crate::error::Result;
 use crate::sync::buf_async_reader;
 
 use super::error::WhileParsingBox;
