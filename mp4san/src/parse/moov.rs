@@ -51,8 +51,8 @@ impl ParsedBox for MoovBox {
         self.children.encoded_len()
     }
 
-    fn put_buf(&self, mut out: &mut dyn BufMut) {
-        self.children.put_buf(&mut out);
+    fn put_buf(&self, out: &mut dyn BufMut) {
+        self.children.put_buf(out);
     }
 }
 

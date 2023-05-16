@@ -18,7 +18,7 @@ fn main() -> Result<(), anyhow::Error> {
 
     let args = Args::try_parse().context("Error parsing command line arguments")?;
 
-    let file = File::open(&args.file).context("Error opening mp4 file")?;
+    let file = File::open(args.file).context("Error opening mp4 file")?;
 
     mp4san::sanitize(file).context("Error parsing mp4 file")?;
 

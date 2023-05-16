@@ -78,7 +78,7 @@ impl<T: Clone + Debug + 'static> ParsedBox for CoBox<T> {
 
     fn put_buf(&self, buf: &mut dyn BufMut) {
         Self::FULL_BOX_HEADER.put_buf(&mut *buf);
-        buf.put_u32((self.entry_count()).try_into().unwrap());
+        buf.put_u32(self.entry_count());
         buf.put_slice(&self.entries[..])
     }
 }
