@@ -2,8 +2,8 @@ use proc_macro::TokenStream;
 
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{quote, quote_spanned};
-use syn::{parse_macro_input, Data, DeriveInput, Ident, Index, Lit, Meta};
 use syn::spanned::Spanned;
+use syn::{parse_macro_input, Data, DeriveInput, Ident, Index, Lit, Meta};
 use uuid::Uuid;
 
 #[proc_macro_derive(Mp4Box, attributes(box_type))]
@@ -67,7 +67,7 @@ fn derive_write_fn(input: &DeriveInput) -> TokenStream2 {
                 }
             });
             quote! { #( output.write_all(&#place_expr.to_be_bytes())?; )* }
-        },
+        }
         _ => unreachable!(),
     };
     quote! {
@@ -116,7 +116,7 @@ fn derive_read_fn(input: &DeriveInput) -> TokenStream2 {
                     std::result::Result::Ok(#ident { #( #field_ident: #bind_ident ),* })
                 }
             }
-        },
+        }
         _ => unreachable!(),
     }
 }
@@ -127,18 +127,20 @@ fn extract_box_type(input: &DeriveInput) -> TokenStream2 {
         // When emitting compiler errors, no semicolon should be placed after `compile_error!()`:
         // doing so will generate extraneous errors (type mismatch errors, Rust parse errors, or the
         // like) in addition to the error we intend to emit.
-        return quote! { std::compile_error!("missing `#[box_type]` attribute") }.into();
+        return quote! { std::compile_error!("missing `#[box_type]` attribute") };
     };
     if let Some(extra_attr) = iter.next() {
         return quote_spanned! { extra_attr.span() =>
             std::compile_error!("more than one `#[box_type]` attribute is not allowed")
-        }.into();
+        };
     }
     let lit = match attr.parse_meta() {
         Ok(Meta::NameValue(name_value)) => name_value.lit,
-        _ => return quote_spanned! { attr.span() =>
-            std::compile_error!("`box_type` attribute must be of the form `#[box_type = ...]`")
-        }.into(),
+        _ => {
+            return quote_spanned! { attr.span() =>
+                std::compile_error!("`box_type` attribute must be of the form `#[box_type = ...]`")
+            }
+        }
     };
     match &lit {
         Lit::Int(int_lit) => {
@@ -151,7 +153,7 @@ fn extract_box_type(input: &DeriveInput) -> TokenStream2 {
             } else {
                 return quote! { mp4san_isomparse::BoxType::Extended(uuid::Uuid::from_u128(#int)) };
             }
-        },
+        }
         Lit::Str(string_lit) => {
             let string = string_lit.value();
             if let Ok(uuid) = Uuid::parse_str(&string) {
@@ -166,7 +168,7 @@ fn extract_box_type(input: &DeriveInput) -> TokenStream2 {
                     mp4san_isomparse::BoxType::Compact(type_)
                 };
             }
-        },
+        }
         Lit::ByteStr(bytes_lit) => {
             let bytes = bytes_lit.value();
             if bytes.len() == 4 {
@@ -176,8 +178,8 @@ fn extract_box_type(input: &DeriveInput) -> TokenStream2 {
                     mp4san_isomparse::BoxType::Compact(type_)
                 };
             }
-        },
-        _ => {},
+        }
+        _ => {}
     }
     quote_spanned! { lit.span() => std::compile_error!(concat!(
         r#"malformed `box_type` attribute input: try `"moov"`, `b"moov"`, or `0x6d6f6f76` for a"#,
@@ -194,7 +196,7 @@ fn sum_box_size(derive_input: &DeriveInput) -> TokenStream2 {
                 quote_spanned! { field.span() => std::mem::size_of::<#ty>() }
             });
             quote! { #(+ #sum_expr)* }
-        },
+        }
         _ => unreachable!(),
     };
     quote! {

@@ -56,8 +56,7 @@ pub trait Mp4Box {
     /// # Panics
     /// Panics or aborts if the vector can't be allocated.
     fn to_bytes(&self) -> Result<Vec<u8>, Error> {
-        self.to_bytes_try_reserve()
-            .map_err(|e| e.handle_alloc_error())
+        self.to_bytes_try_reserve().map_err(|e| e.handle_alloc_error())
     }
 
     /// Serialize the box into a new byte vector.
@@ -206,10 +205,7 @@ impl BoxSize {
     pub fn new(serialized_size: u64) -> Result<Self, BoxSizeError> {
         let fits_in_u32 = u32::try_from(serialized_size).is_ok();
         match serialized_size {
-            0 | 8.. => Ok(Self {
-                inner: serialized_size,
-                originally_extended: !fits_in_u32,
-            }),
+            0 | 8.. => Ok(Self { inner: serialized_size, originally_extended: !fits_in_u32 }),
             1 => Err(BoxSizeError::Extended),
             2..=7 => Err(BoxSizeError::Impossible),
         }
@@ -374,10 +370,7 @@ mod tests {
 
     #[test]
     fn test_size_simple() {
-        let not_a_real = NotARealBox {
-            bar_ax: u64::MAX,
-            foo_by: u32::MAX,
-        };
+        let not_a_real = NotARealBox { bar_ax: u64::MAX, foo_by: u32::MAX };
         assert_eq!(not_a_real.size().to_explicit_size(), Some(4 + 4 + 8 + 4));
     }
 
@@ -389,10 +382,7 @@ mod tests {
 
     #[test]
     fn test_type_bytes() {
-        let not_a_real = NotARealBox {
-            bar_ax: u64::MAX,
-            foo_by: u32::MAX,
-        };
+        let not_a_real = NotARealBox { bar_ax: u64::MAX, foo_by: u32::MAX };
         assert_eq!(not_a_real.type_(), BoxType::Compact(0xff583000));
     }
 
@@ -417,10 +407,7 @@ mod tests {
 
     #[test]
     fn test_ser_simple() {
-        let not_a_real = NotARealBox {
-            bar_ax: !0 >> 1,
-            foo_by: !0 >> 1,
-        };
+        let not_a_real = NotARealBox { bar_ax: !0 >> 1, foo_by: !0 >> 1 };
         assert_eq!(
             not_a_real.to_bytes().unwrap(),
             b"\0\0\0\x14\xffX0\0\x7f\xff\xff\xff\xff\xff\xff\xff\x7f\xff\xff\xff"
@@ -454,95 +441,65 @@ mod tests {
 
     #[test]
     fn read_header_extended() {
-        let mut data = Cursor::new(
-            b"\0\0\0\x18uuid\xc1\x2f\xdd\x3f\x1e\x93\x46\x4c\xba\xee\x7c\x44\x80\x62\x8f\x58",
-        );
+        let mut data = Cursor::new(b"\0\0\0\x18uuid\xc1\x2f\xdd\x3f\x1e\x93\x46\x4c\xba\xee\x7c\x44\x80\x62\x8f\x58");
         let (size, type_) = read_header(&mut data).unwrap();
         assert_eq!(size.to_explicit_size(), Some(24));
-        assert_eq!(
-            type_,
-            BoxType::Extended(uuid!("c12fdd3f-1e93-464c-baee-7c4480628f58"))
-        );
+        assert_eq!(type_, BoxType::Extended(uuid!("c12fdd3f-1e93-464c-baee-7c4480628f58")));
     }
 
     #[test]
     fn read_header_too_small_compact() {
         let mut data = Cursor::new(b"\0\0\0\x07tttt");
-        assert!(matches!(
-            read_header(&mut data),
-            Err(Error::ImpossibleBoxSize(..))
-        ));
+        assert!(matches!(read_header(&mut data), Err(Error::ImpossibleBoxSize(..))));
     }
 
     #[test]
     fn read_header_too_small_exttype() {
-        let mut data = Cursor::new(
-            b"\0\0\0\x17uuid\xc1\x2f\xdd\x3f\x1e\x93\x46\x4c\xba\xee\x7c\x44\x80\x62\x8f\x58",
-        );
-        assert!(matches!(
-            read_header(&mut data),
-            Err(Error::ImpossibleBoxSize(..))
-        ));
+        let mut data = Cursor::new(b"\0\0\0\x17uuid\xc1\x2f\xdd\x3f\x1e\x93\x46\x4c\xba\xee\x7c\x44\x80\x62\x8f\x58");
+        assert!(matches!(read_header(&mut data), Err(Error::ImpossibleBoxSize(..))));
     }
 
     #[test]
     fn read_header_too_small_extsize() {
         let mut data = Cursor::new(b"\0\0\0\x01tttt\0\0\0\0\0\0\0\x0f");
-        assert!(matches!(
-            read_header(&mut data),
-            Err(Error::ImpossibleBoxSize(..))
-        ));
+        assert!(matches!(read_header(&mut data), Err(Error::ImpossibleBoxSize(..))));
     }
 
     #[test]
     fn read_header_too_small_extsize_exttype() {
-        let mut data = Cursor::new(b"\0\0\0\x01uuid\0\0\0\0\0\0\0\x1f\xc1\x2f\xdd\x3f\x1e\x93\x46\x4c\xba\xee\x7c\x44\x80\x62\x8f\x58");
-        assert!(matches!(
-            read_header(&mut data),
-            Err(Error::ImpossibleBoxSize(..))
-        ));
+        let mut data = Cursor::new(
+            b"\0\0\0\x01uuid\0\0\0\0\0\0\0\x1f\xc1\x2f\xdd\x3f\x1e\x93\x46\x4c\xba\xee\x7c\x44\x80\x62\x8f\x58",
+        );
+        assert!(matches!(read_header(&mut data), Err(Error::ImpossibleBoxSize(..))));
     }
 
     #[test]
     fn read_header_extsize_zero() {
         let mut data = Cursor::new(b"\0\0\0\x01tttt\0\0\0\0\0\0\0\0");
-        assert!(matches!(
-            read_header(&mut data),
-            Err(Error::ImpossibleBoxSize(..))
-        ));
+        assert!(matches!(read_header(&mut data), Err(Error::ImpossibleBoxSize(..))));
     }
 
     #[test]
     fn read_header_extsize_extsize() {
         let mut data = Cursor::new(b"\0\0\0\x01tttt\0\0\0\0\0\0\0\x01");
-        assert!(matches!(
-            read_header(&mut data),
-            Err(Error::ImpossibleBoxSize(..))
-        ));
+        assert!(matches!(read_header(&mut data), Err(Error::ImpossibleBoxSize(..))));
     }
 
     #[test]
     fn write() {
-        let not_a_real = NotARealBox {
-            bar_ax: 0x0102030405060708,
-            foo_by: 0x090a0b0c,
-        };
+        let not_a_real = NotARealBox { bar_ax: 0x0102030405060708, foo_by: 0x090a0b0c };
         let bytes = b"\0\0\0\x14\xffX0\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c";
         assert_eq!(not_a_real.to_bytes().unwrap(), bytes);
     }
 
     #[test]
     fn read() {
-        let mut data =
-            Cursor::new(b"\0\0\0\x14\xffX0\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c");
+        let mut data = Cursor::new(b"\0\0\0\x14\xffX0\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c");
         let (size, _) = read_header(&mut data).unwrap();
         assert_eq!(size.to_explicit_size(), Some(20));
         assert_eq!(
             NotARealBox::read_from(&mut data, 12).unwrap(),
-            NotARealBox {
-                bar_ax: 0x0102030405060708,
-                foo_by: 0x090a0b0c
-            }
+            NotARealBox { bar_ax: 0x0102030405060708, foo_by: 0x090a0b0c }
         );
     }
 }
