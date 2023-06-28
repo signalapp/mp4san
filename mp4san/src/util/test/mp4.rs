@@ -4,7 +4,7 @@ use std::num::NonZeroUsize;
 use assert_matches::assert_matches;
 use bytes::{Buf, Bytes};
 use derive_builder::Builder;
-use mp4san_test::{verify_ffmpeg, verify_gpac};
+use mp4san_test::{ffmpeg_assert_eq, gpac_assert_eq};
 
 use crate::parse::box_type::{FREE, FTYP, MDAT, MECO, META, MOOV, SKIP};
 use crate::parse::BoxType;
@@ -180,8 +180,8 @@ impl TestMp4 {
         });
         let sanitized_data = sanitized_data(sanitized.clone(), &self.data);
         sanitize(io::Cursor::new(&sanitized_data)).unwrap();
-        verify_ffmpeg(&sanitized_data, &self.mdat_data);
-        verify_gpac(&sanitized_data, &self.mdat_data);
+        ffmpeg_assert_eq(&sanitized_data, &self.mdat_data);
+        gpac_assert_eq(&sanitized_data, &self.mdat_data);
         sanitized
     }
 
@@ -189,8 +189,8 @@ impl TestMp4 {
         let sanitized = sanitize(self.clone()).unwrap();
         assert_eq!(sanitized.data, self.mdat);
         assert_eq!(sanitized.metadata, None);
-        verify_ffmpeg(&self.data, &self.mdat_data);
-        verify_gpac(&self.data, &self.mdat_data);
+        ffmpeg_assert_eq(&self.data, &self.mdat_data);
+        gpac_assert_eq(&self.data, &self.mdat_data);
         sanitized
     }
 

@@ -4,27 +4,96 @@
 //! rust-lang/cargo#1596).
 
 #[cfg(feature = "ffmpeg")]
-mod ffmpeg;
+pub mod ffmpeg;
 
 #[cfg(feature = "gpac")]
-mod gpac;
+pub mod gpac;
 
-/// Read `data` using ffmpeg, verifying that the demuxed frames match the `expected_mdat_data`.
+//
+// public types
+//
+
+//
+// private types
+//
+
+#[derive(Debug, thiserror::Error)]
+pub enum VerifyError<T> {
+    #[error("data longer than expected: frame len {frame_len} > {remaining} remaining")]
+    DataLongerThanExpected { frame_len: usize, remaining: usize },
+
+    #[error("data at offset {offset} did not match")]
+    DataMismatch { offset: u64, len: usize },
+
+    #[error("data shorter than expected: {remaining} remaining")]
+    DataShorterThanExpected { remaining: usize },
+
+    #[error(transparent)]
+    Parse(#[from] T),
+}
+
+//
+// public functions
+//
+
+/// Read `data` using ffmpeg, verifying that the demuxed frames match the `expected_media_data`.
 #[cfg_attr(not(feature = "ffmpeg"), allow(unused_variables))]
-pub fn verify_ffmpeg(data: &[u8], expected_mdat_data: &[u8]) {
+pub fn ffmpeg_assert_eq(data: &[u8], expected_media_data: &[u8]) {
     #[cfg(not(feature = "ffmpeg"))]
     log::info!("not verifying sanitizer output using ffmpeg; ffmpeg feature disabled");
     #[cfg(feature = "ffmpeg")]
-    ffmpeg::verify_ffmpeg(data, expected_mdat_data);
+    ffmpeg::verify_ffmpeg(data, Some(expected_media_data))
+        .unwrap_or_else(|error| panic!("ffmpeg returned an error: {error}\n{error:?}"));
 }
 
-/// Read `data` using GPAC.
+/// Read `data` using ffmpeg, verifying that it cannot be demuxed.
+#[cfg_attr(not(feature = "ffmpeg"), allow(unused_variables))]
+pub fn ffmpeg_assert_invalid(data: &[u8]) {
+    #[cfg(not(feature = "ffmpeg"))]
+    log::info!("not verifying sanitizer output using ffmpeg; ffmpeg feature disabled");
+    #[cfg(feature = "ffmpeg")]
+    ffmpeg::verify_ffmpeg(data, None)
+        .err()
+        .unwrap_or_else(|| panic!("ffmpeg didn't return an error"));
+}
+
+/// Read `data` using ffmpeg, verifying that it can be demuxed.
+#[cfg_attr(not(feature = "ffmpeg"), allow(unused_variables))]
+pub fn ffmpeg_assert_valid(data: &[u8]) {
+    #[cfg(not(feature = "ffmpeg"))]
+    log::info!("not verifying sanitizer output using ffmpeg; ffmpeg feature disabled");
+    #[cfg(feature = "ffmpeg")]
+    ffmpeg::verify_ffmpeg(data, None).unwrap_or_else(|error| panic!("ffmpeg returned an error: {error}\n{error:?}"));
+}
+
+/// Read `data` using GPAC, verifying that the demuxed frames match the `expected_media_data`.
 #[cfg_attr(not(feature = "gpac"), allow(unused_variables))]
-pub fn verify_gpac(data: &[u8], expected_mdat_data: &[u8]) {
+pub fn gpac_assert_eq(data: &[u8], expected_media_data: &[u8]) {
     #[cfg(not(feature = "gpac"))]
     log::info!("not verifying sanitizer output using gpac; gpac feature disabled");
     #[cfg(feature = "gpac")]
-    gpac::verify_gpac(data, expected_mdat_data);
+    gpac::verify_gpac(data, Some(expected_media_data))
+        .unwrap_or_else(|error| panic!("gpac returned an error: {error}\n{error:?}"));
+}
+
+/// Read `data` using GPAC, verifying that it cannot be demuxed.
+#[cfg_attr(not(feature = "gpac"), allow(unused_variables))]
+pub fn gpac_assert_invalid(data: &[u8]) {
+    #[cfg(not(feature = "gpac"))]
+    log::info!("not verifying sanitizer output using gpac; gpac feature disabled");
+    #[cfg(feature = "gpac")]
+    gpac::verify_gpac(data, None)
+        .err()
+        .unwrap_or_else(|| panic!("gpac didn't return an error"));
+}
+
+/// Read `data` using GPAC, verifying that it can be demuxed.
+#[cfg_attr(not(feature = "gpac"), allow(unused_variables))]
+pub fn gpac_assert_valid(data: &[u8]) {
+    #[cfg(not(feature = "gpac"))]
+    log::info!("not verifying sanitizer output using gpac; gpac feature disabled");
+    #[cfg(feature = "gpac")]
+    gpac::verify_gpac(data, None).unwrap_or_else(|error| panic!("gpac returned an error: {error}\n{error:?}"));
 }
 
 pub fn example_ftyp() -> Vec<u8> {
