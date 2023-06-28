@@ -23,6 +23,7 @@ pub fn verify_ffmpeg(data: &[u8], mut expected_mdat_data: &[u8]) {
         log::log!(target: "ffmpeg", level, "{message}");
     }
 
+    #[allow(clippy::useless_transmute)] // false positive
     unsafe {
         // va_list is a macro to a struct on some targets, which causes type checking to fail.
         let log_callback: unsafe extern "C" fn(ptr: *mut c_void, level: c_int, format: *const c_char, va_list: _) =
