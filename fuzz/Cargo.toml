@@ -3,12 +3,6 @@ name = "mp4san-fuzz"
 version = "0.1.0"
 edition = "2021"
 
-[features]
-default = ["ffmpeg", "gpac"]
-ffmpeg = ["mp4san-test/ffmpeg"]
-gpac = ["mp4san-test/gpac"]
-
 [dependencies]
 afl = "0.12.16"
 mp4san = { path = "../mp4san" }
-mp4san-test = { path = "../test" }

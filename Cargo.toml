@@ -1,3 +1,4 @@
 [workspace]
 members = ["cli", "fuzz", "mp4san", "test", "test-gen"]
+default-members = ["cli", "mp4san", "test", "test-gen"]
 resolver = "2"

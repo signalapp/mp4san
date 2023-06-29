@@ -73,6 +73,37 @@ jobs:
         with:
           token: ${{ github.token }}
 
+  fuzz-afl:
+    name: fuzz-afl
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v3
+
+      - name: cache cargo output
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-afl-${{ hashFiles('Cargo.lock') }}
+
+      - name: cargo install afl
+        run:  cargo install afl --verbose
+
+      - name: install ffmpeg to generate fuzzer input
+        run:  sudo apt-get install --no-install-recommends -y ffmpeg
+
+      - name: fuzz
+        run:  cd fuzz && AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 ./fuzz -V 10
+
+      - name: cargo clippy
+        uses: actions-rs/clippy-check@v1
+        with:
+          token: ${{ github.token }}
+
   build-nightly:
     name: check-nightly
     runs-on: ubuntu-latest
