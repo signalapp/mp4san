@@ -3,3 +3,5 @@
 /target
 Cargo.lock
 /.cargo/
+/fuzz/out/
+/fuzz/in/
