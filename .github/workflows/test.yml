@@ -93,16 +93,36 @@ jobs:
       - name: cargo install afl
         run:  cargo install afl --verbose
 
-      - name: install ffmpeg to generate fuzzer input
-        run:  sudo apt-get install --no-install-recommends -y ffmpeg
+      - name: fuzz for 10 seconds
+        run:  cd fuzz-afl && AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 ./fuzz -V 10
 
-      - name: fuzz
-        run:  cd fuzz && AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 ./fuzz -V 10
+  fuzz-libfuzzer:
+    name: fuzz-libfuzzer
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v3
 
-      - name: cargo clippy
-        uses: actions-rs/clippy-check@v1
+      - name: install latest rust nightly toolchain
+        uses: actions-rs/toolchain@v1
         with:
-          token: ${{ github.token }}
+            toolchain: nightly
+
+      - name: cache cargo output
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-libfuzzer-${{ hashFiles('Cargo.lock') }}
+
+      - name: cargo install cargo-fuzz
+        run:  cargo install cargo-fuzz --verbose
+
+      - name: fuzz for 10 seconds
+        run:  cd mp4san && cargo +nightly fuzz run sanitize -- -seed_inputs=$(find fuzz/input/ -type f | tr '\n' ,) -max_total_time=10
 
   build-nightly:
     name: check-nightly

@@ -3,5 +3,9 @@
 /target
 Cargo.lock
 /.cargo/
-/fuzz/out/
-/fuzz/in/
+/fuzz-afl/target/
+/fuzz-afl/output/
+/mp4san/fuzz/artifacts/
+/mp4san/fuzz/corpus/
+/mp4san/fuzz/coverage/
+/mp4san/fuzz/target/

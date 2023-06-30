@@ -35,18 +35,6 @@ command() {
     fi
 }
 
-if [ ! -e in ]; then
-    echo "generating input files using ffmpeg..." 1>&2
-    if [ -e in~ ]; then
-        echo "removing scratch directory 'in~':" 1>&2
-        command rm -ir in~
-    fi
-    command mkdir in~
-    command ffmpeg -f lavfi -i smptebars -frames:v 30 in~/ffmpeg-smptebars-30f.mp4
-    command ffmpeg -f lavfi -i color=color=black -frames:v 1 in~/ffmpeg-black-1f.mp4
-    command mv -n in~ in
-fi
-
 command cargo afl build
 
 FUZZ_ARGS=
@@ -56,8 +44,8 @@ fi
 
 if [ -n "$1" ]; then
     for idx in $(seq 1 $idx); do
-        command cargo afl fuzz ${FUZZ_ARGS} -i in -o out -S fuzzer-$idx ../target/debug/mp4san-fuzz &
+        command cargo afl fuzz ${FUZZ_ARGS} -i input -o output -S fuzzer-$idx target/debug/mp4san-fuzz-afl &
     done
 fi
 
-command cargo afl fuzz ${FUZZ_ARGS} -i in -o out -M main ../target/debug/mp4san-fuzz
+command cargo afl fuzz ${FUZZ_ARGS} -i input -o output -M main target/debug/mp4san-fuzz-afl

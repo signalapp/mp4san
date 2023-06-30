@@ -1,5 +1,8 @@
+[workspace]
+members = ["."]
+
 [package]
-name = "mp4san-fuzz"
+name = "mp4san-fuzz-afl"
 version = "0.1.0"
 edition = "2021"
 
