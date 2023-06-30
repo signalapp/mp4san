@@ -122,7 +122,7 @@ jobs:
         run:  cargo install cargo-fuzz --verbose
 
       - name: fuzz for 10 seconds
-        run:  cd mp4san && cargo +nightly fuzz run sanitize -- -seed_inputs=$(find fuzz/input/ -type f | tr '\n' ,) -max_total_time=10
+        run:  cd mp4san && cargo +nightly fuzz run sanitize -- -seed_inputs=$(find fuzz/input/ -type f | tr '\n' ,) -dict=fuzz/mp4.dict -max_total_time=10
 
   build-nightly:
     name: check-nightly
