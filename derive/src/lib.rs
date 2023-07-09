@@ -110,6 +110,16 @@ fn derive_read_fn(input: &DeriveInput) -> TokenStream2 {
                                 stringify!(#field_ty),
                             )?;
                     )*
+                    if !buf.is_empty() {
+                        return
+                            mp4san::parse::error::__ParseResultExt::while_parsing_box(
+                                mp4san::error::__ResultExt::attach_printable(
+                                    Err(ParseError::InvalidInput.into()),
+                                    "extra unparsed data",
+                                ),
+                                #ident::box_type(),
+                            );
+                    }
                     std::result::Result::Ok(#ident { #( #field_ident: #bind_ident ),* })
                 }
             }

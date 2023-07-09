@@ -55,6 +55,10 @@ pub trait __ParseResultExt: ResultExt + Sized {
         self.attach_printable(WhileParsingType(type_name::<T>()))
     }
 
+    fn while_parsing_box(self, box_type: BoxType) -> Self {
+        self.attach_printable(WhileParsingBox(box_type))
+    }
+
     fn while_parsing_field<T>(self, box_type: BoxType, field_name: T) -> Self
     where
         T: Display + Debug + Send + Sync + 'static,
