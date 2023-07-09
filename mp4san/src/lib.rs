@@ -46,6 +46,9 @@
 //! The [`parse`] module also contains a less stable and undocumented API which can be used to parse individual MP4 box
 //! types.
 
+// Used by the derive macros' generated code.
+extern crate self as mp4san;
+
 #[macro_use]
 mod macros;
 

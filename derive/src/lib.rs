@@ -6,8 +6,8 @@ use syn::spanned::Spanned;
 use syn::{parse_macro_input, Data, DeriveInput, Ident, Index, Lit, Meta};
 use uuid::Uuid;
 
-#[proc_macro_derive(Mp4Box, attributes(box_type))]
-pub fn derive_mp4_box(input: TokenStream) -> TokenStream {
+#[proc_macro_derive(ParseBox, attributes(box_type))]
+pub fn derive_parse_box(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let ident = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
@@ -19,43 +19,48 @@ pub fn derive_mp4_box(input: TokenStream) -> TokenStream {
         });
     }
     let box_type = extract_box_type(&input);
-    let size = sum_box_size(&input);
-    let write_fn = derive_write_fn(&input);
     let read_fn = derive_read_fn(&input);
 
     TokenStream::from(quote! {
         #[automatically_derived]
-        impl #impl_generics mp4san_isomparse::Mp4Box for #ident #ty_generics #where_clause {
-            fn size(&self) -> mp4san_isomparse::BoxSize {
-                mp4san_isomparse::BoxSize::new(
-                    std::convert::TryFrom::try_from(#size).unwrap(),
-                ).unwrap()
-            }
-
-            fn type_(&self) -> mp4san_isomparse::BoxType {
+        impl #impl_generics mp4san::parse::ParseBox for #ident #ty_generics #where_clause {
+            fn box_type() -> mp4san::parse::BoxType {
                 #box_type
             }
-
-            #write_fn
 
             #read_fn
         }
     })
 }
 
+#[proc_macro_derive(ParsedBox, attributes(box_type))]
+pub fn derive_parsed_box(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let ident = &input.ident;
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+
+    if matches!(input.data, Data::Enum(_) | Data::Union(_)) {
+        // This one _does_ need a semicolon though.
+        return TokenStream::from(quote! {
+            std::compile_error!("this trait can only be derived for structs");
+        });
+    }
+    let size = sum_box_size(&input);
+    let write_fn = derive_write_fn(&input);
+
+    TokenStream::from(quote! {
+        #[automatically_derived]
+        impl #impl_generics mp4san::parse::ParsedBox for #ident #ty_generics #where_clause {
+            fn encoded_len(&self) -> u64 {
+                #size
+            }
+
+            #write_fn
+        }
+    })
+}
+
 fn derive_write_fn(input: &DeriveInput) -> TokenStream2 {
-    let write_header = quote! {
-        let (size, largesize) = self.size().to_serialized_size();
-        let (type_, usertype) = self.type_().to_serialized_type();
-        output.write_all(&size.to_be_bytes())?;
-        output.write_all(&type_.to_be_bytes())?;
-        if let Some(largesize) = largesize {
-            output.write_all(&largesize.to_be_bytes())?;
-        }
-        if let Some(usertype) = usertype {
-            output.write_all(&usertype)?;
-        }
-    };
     let write_fields = match &input.data {
         Data::Struct(struct_data) => {
             let place_expr = struct_data.fields.iter().enumerate().map(|(index, field)| {
@@ -66,18 +71,13 @@ fn derive_write_fn(input: &DeriveInput) -> TokenStream2 {
                     quote_spanned! { field.span() => self.#tuple_index }
                 }
             });
-            quote! { #( output.write_all(&#place_expr.to_be_bytes())?; )* }
+            quote! { #( mp4san::parse::Mpeg4Int::put_buf(&#place_expr, &mut *out); )* }
         }
         _ => unreachable!(),
     };
     quote! {
-        fn write_to<W: std::io::Write + ?std::marker::Sized>(
-            &self,
-            output: &mut W,
-        ) -> std::result::Result<(), mp4san_isomparse::Error> {
-            #write_header
+        fn put_buf(&self, out: &mut dyn bytes::BufMut) {
             #write_fields
-            std::result::Result::Ok(())
         }
     }
 }
@@ -101,17 +101,14 @@ fn derive_read_fn(input: &DeriveInput) -> TokenStream2 {
                 }
             }
             quote! {
-                fn read_from<R: std::io::Read + ?std::marker::Sized>(
-                    input: &mut R,
-                    size: std::primitive::u64,
-                ) -> std::result::Result<Self, mp4san_isomparse::Error>
-                where
-                    Self: std::marker::Sized,
-                {
+                fn parse(buf: &mut bytes::BytesMut) -> std::result::Result<Self, mp4san::Report<mp4san::parse::ParseError>> {
                     #(
-                        let mut buffer = [0; std::mem::size_of::<#field_ty>()];
-                        input.read_exact(&mut buffer)?;
-                        let #bind_ident = #field_ty::from_be_bytes(buffer);
+                        let #bind_ident: #field_ty =
+                            mp4san::parse::error::__ParseResultExt::while_parsing_field(
+                                mp4san::parse::Mpeg4Int::parse(&mut *buf),
+                                #ident::box_type(),
+                                stringify!(#field_ty),
+                            )?;
                     )*
                     std::result::Result::Ok(#ident { #( #field_ident: #bind_ident ),* })
                 }
@@ -149,23 +146,21 @@ fn extract_box_type(input: &DeriveInput) -> TokenStream2 {
                 Err(error) => return error.into_compile_error(),
             };
             if let Ok(int) = u32::try_from(int) {
-                return quote! { mp4san_isomparse::BoxType::Compact(#int) };
+                return quote! { mp4san::parse::BoxType::FourCC(mp4san::parse::FourCC { value: #int.to_be_bytes() }) };
             } else {
-                return quote! { mp4san_isomparse::BoxType::Extended(uuid::Uuid::from_u128(#int)) };
+                return quote! { mp4san::parse::BoxType::Uuid(mp4san::parse::BoxUuid { value: #int.to_be_bytes() }) };
             }
         }
         Lit::Str(string_lit) => {
             let string = string_lit.value();
             if let Ok(uuid) = Uuid::parse_str(&string) {
                 let int = uuid.as_u128();
-                return quote! { mp4san_isomparse::BoxType::Extended(uuid::Uuid::from_u128(#int)) };
+                return quote! { mp4san::parse::BoxType::Uuid(mp4san::parse::BoxUuid { value: #int.to_be_bytes() }) };
             } else if string.len() == 4 {
                 return quote! {
                     let type_string = #string_lit;
-                    let type_ = std::primitive::u32::from_be_bytes(
-                        std::convert::TryInto::try_into(type_string.as_bytes()).unwrap(),
-                    );
-                    mp4san_isomparse::BoxType::Compact(type_)
+                    let type_ = std::convert::TryInto::try_into(type_string.as_bytes()).unwrap();
+                    mp4san::parse::BoxType::FourCC(mp4san::parse::FourCC { value: type_ })
                 };
             }
         }
@@ -173,9 +168,7 @@ fn extract_box_type(input: &DeriveInput) -> TokenStream2 {
             let bytes = bytes_lit.value();
             if bytes.len() == 4 {
                 return quote! {
-                    let type_bytes = *#bytes_lit;
-                    let type_ = std::primitive::u32::from_be_bytes(type_bytes);
-                    mp4san_isomparse::BoxType::Compact(type_)
+                    mp4san::parse::BoxType::FourCC(mp4san::parse::FourCC { value: *#bytes_lit })
                 };
             }
         }
@@ -193,20 +186,13 @@ fn sum_box_size(derive_input: &DeriveInput) -> TokenStream2 {
         Data::Struct(struct_data) => {
             let sum_expr = struct_data.fields.iter().map(|field| {
                 let ty = &field.ty;
-                quote_spanned! { field.span() => std::mem::size_of::<#ty>() }
+                quote_spanned! { field.span() => std::mem::size_of::<#ty>() as u64 }
             });
             quote! { #(+ #sum_expr)* }
         }
         _ => unreachable!(),
     };
     quote! {
-        // size
-        std::mem::size_of::<std::primitive::u32>()
-        // type
-        + std::mem::size_of::<std::primitive::u32>()
-        // usertype
-        + if self.type_().is_extended() { std::mem::size_of::<[std::primitive::u8; 16]>() } else { 0 }
-        // whatever fields the box has
-        #sum_expr
+        0 #sum_expr
     }
 }

@@ -1,3 +1,5 @@
+//! Error types returned by the unstable parsing API.
+
 use std::any::type_name;
 use std::fmt::{Debug, Display};
 
@@ -46,7 +48,9 @@ pub enum ParseError {
     UnsupportedFormat(FourCC),
 }
 
-pub(crate) trait ParseResultExt: ResultExt + Sized {
+#[doc(hidden)]
+/// Used by the derive macros' generated code.
+pub trait __ParseResultExt: ResultExt + Sized {
     fn while_parsing_type<T>(self) -> Self {
         self.attach_printable(WhileParsingType(type_name::<T>()))
     }
@@ -70,6 +74,7 @@ pub(crate) trait ParseResultExt: ResultExt + Sized {
         self.attach_printable(WhereEq(lhs, rhs))
     }
 }
+pub(crate) use self::__ParseResultExt as ParseResultExt;
 
 #[derive(Clone, Copy, Debug, Display)]
 #[display(fmt = "multiple `{}` boxes", _0)]

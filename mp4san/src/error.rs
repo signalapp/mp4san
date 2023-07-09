@@ -42,10 +42,13 @@ pub struct Report<E> {
 
 pub(crate) type Result<T, E> = std::result::Result<T, Report<E>>;
 
-pub(crate) trait ResultExt: Sized {
+#[doc(hidden)]
+/// Used by the derive macros' generated code.
+pub trait __ResultExt: Sized {
     #[track_caller]
     fn attach_printable<P: Display + Send + Sync + 'static>(self, printable: P) -> Self;
 }
+pub(crate) use self::__ResultExt as ResultExt;
 
 struct ReportInner {
     location: &'static Location<'static>,
