@@ -71,7 +71,7 @@ fn derive_write_fn(input: &DeriveInput) -> TokenStream2 {
                     quote_spanned! { field.span() => self.#tuple_index }
                 }
             });
-            quote! { #( mp4san::parse::Mpeg4Int::put_buf(&#place_expr, &mut *out); )* }
+            quote! { #( mp4san::parse::Mp4Prim::put_buf(&#place_expr, &mut *out); )* }
         }
         _ => unreachable!(),
     };
@@ -105,7 +105,7 @@ fn derive_read_fn(input: &DeriveInput) -> TokenStream2 {
                     #(
                         let #bind_ident: #field_ty =
                             mp4san::parse::error::__ParseResultExt::while_parsing_field(
-                                mp4san::parse::Mpeg4Int::parse(&mut *buf),
+                                mp4san::parse::Mp4Prim::parse(&mut *buf),
                                 #ident::box_type(),
                                 stringify!(#field_ty),
                             )?;
@@ -196,7 +196,7 @@ fn sum_box_size(derive_input: &DeriveInput) -> TokenStream2 {
         Data::Struct(struct_data) => {
             let sum_expr = struct_data.fields.iter().map(|field| {
                 let ty = &field.ty;
-                quote_spanned! { field.span() => <#ty as mp4san::parse::Mpeg4Int>::encoded_len() }
+                quote_spanned! { field.span() => <#ty as mp4san::parse::Mp4Prim>::encoded_len() }
             });
             quote! { #(+ #sum_expr)* }
         }

@@ -10,7 +10,7 @@ use crate::error::Result;
 use crate::sync::buf_async_reader;
 
 use super::error::WhileParsingBox;
-use super::{FourCC, Mpeg4Int, ParseError};
+use super::{FourCC, Mp4Prim, ParseError};
 
 #[allow(missing_docs)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -263,17 +263,6 @@ impl FullBoxHeader {
         Self { version: 0, flags: 0 }
     }
 
-    pub fn parse<B: Buf>(mut buf: B) -> Result<Self, ParseError> {
-        let version = u8::parse(&mut buf)?;
-        let flags = <[u8; 3]>::parse(&mut buf)?;
-        let flags = u32::from_be_bytes([0, flags[0], flags[1], flags[2]]);
-        Ok(Self { version, flags })
-    }
-
-    pub const fn encoded_len(&self) -> u64 {
-        4
-    }
-
     pub fn ensure_eq(&self, other: &Self) -> Result<(), ParseError> {
         ensure_attach!(
             self.version == other.version,
@@ -287,8 +276,21 @@ impl FullBoxHeader {
         );
         Ok(())
     }
+}
 
-    pub fn put_buf<B: BufMut>(&self, mut out: B) {
+impl Mp4Prim for FullBoxHeader {
+    fn parse<B: Buf>(mut buf: B) -> Result<Self, ParseError> {
+        let version = u8::parse(&mut buf)?;
+        let flags = <[u8; 3]>::parse(buf)?;
+        let flags = u32::from_be_bytes([0, flags[0], flags[1], flags[2]]);
+        Ok(Self { version, flags })
+    }
+
+    fn encoded_len() -> u64 {
+        4
+    }
+
+    fn put_buf<B: BufMut>(&self, mut out: B) {
         out.put_u8(self.version);
         out.put_uint(self.flags.into(), 3);
     }

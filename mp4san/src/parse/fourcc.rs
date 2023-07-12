@@ -8,7 +8,7 @@ use crate::error::Result;
 
 use super::error::ParseResultExt;
 use super::integers::Mpeg4IntWriterExt;
-use super::{Mpeg4Int, ParseError};
+use super::{Mp4Prim, ParseError};
 
 /// A four-byte character code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,9 +36,9 @@ impl FourCC {
     }
 }
 
-impl Mpeg4Int for FourCC {
+impl Mp4Prim for FourCC {
     fn parse<B: Buf>(buf: B) -> Result<Self, ParseError> {
-        Ok(FourCC { value: Mpeg4Int::parse(buf).while_parsing_type::<Self>()? })
+        Ok(FourCC { value: Mp4Prim::parse(buf).while_parsing_type::<Self>()? })
     }
 
     fn encoded_len() -> u64 {

@@ -6,7 +6,7 @@ use crate::error::Result;
 
 use super::error::{ParseResultExt, WhereEq, WhileParsingField};
 use super::mp4box::ParsedBox;
-use super::{BoxType, FourCC, Mpeg4Int, Mpeg4IntReaderExt, ParseBox, ParseError};
+use super::{BoxType, FourCC, Mp4Prim, Mpeg4IntReaderExt, ParseBox, ParseError};
 
 #[derive(Clone, Debug)]
 pub struct FtypBox {
@@ -53,7 +53,7 @@ impl ParseBox for FtypBox {
 
 impl ParsedBox for FtypBox {
     fn encoded_len(&self) -> u64 {
-        FourCC::size() + <u32 as Mpeg4Int>::encoded_len() + self.compatible_brands.len() as u64
+        FourCC::size() + <u32 as Mp4Prim>::encoded_len() + self.compatible_brands.len() as u64
     }
 
     fn put_buf(&self, mut out: &mut dyn BufMut) {

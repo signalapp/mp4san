@@ -10,27 +10,27 @@ use crate::error::Result;
 use super::error::WhileParsingType;
 use super::ParseError;
 
-pub trait Mpeg4Int: Sized {
+pub trait Mp4Prim: Sized {
     fn parse<B: Buf>(buf: B) -> Result<Self, ParseError>;
     fn encoded_len() -> u64;
     fn put_buf<B: BufMut>(&self, buf: B);
 }
 
 pub trait Mpeg4IntReaderExt: Buf {
-    fn get<T: Mpeg4Int>(&mut self) -> Result<T, ParseError> {
+    fn get<T: Mp4Prim>(&mut self) -> Result<T, ParseError> {
         T::parse(self)
     }
 }
 
 pub trait Mpeg4IntWriterExt: BufMut {
-    fn put_mp4int<T: Mpeg4Int>(&mut self, value: &T) {
+    fn put_mp4int<T: Mp4Prim>(&mut self, value: &T) {
         value.put_buf(self)
     }
 }
 
-macro_rules! mpeg4_int {
+macro_rules! mp4_int {
     ($($ty:ty => ($get_fun:ident, $put_fun:ident)),+ $(,)?) => {
-        $(impl Mpeg4Int for $ty {
+        $(impl Mp4Prim for $ty {
             fn parse<B: Buf>(mut buf: B) -> Result<Self, ParseError> {
                 if buf.remaining() < Self::encoded_len() as usize {
                     use crate::parse::error::WhileParsingType;
@@ -50,7 +50,7 @@ macro_rules! mpeg4_int {
     };
 }
 
-mpeg4_int! {
+mp4_int! {
     u8 => (get_u8, put_u8),
     u16 => (get_u16, put_u16),
     u32 => (get_u32, put_u32),
@@ -61,7 +61,7 @@ mpeg4_int! {
     i64 => (get_i64, put_i64),
 }
 
-impl<T: Mpeg4Int, const N: usize> Mpeg4Int for [T; N] {
+impl<T: Mp4Prim, const N: usize> Mp4Prim for [T; N] {
     fn parse<B: Buf>(mut buf: B) -> Result<Self, ParseError> {
         ensure_attach!(
             buf.remaining() >= Self::encoded_len() as usize,

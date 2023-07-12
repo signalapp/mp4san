@@ -20,7 +20,7 @@ pub use error::ParseError;
 pub use fourcc::FourCC;
 pub use ftyp::FtypBox;
 pub use header::{box_type, BoxHeader, BoxSize, BoxType, BoxUuid, FullBoxHeader};
-pub use integers::{Mpeg4Int, Mpeg4IntReaderExt, Mpeg4IntWriterExt};
+pub use integers::{Mp4Prim, Mpeg4IntReaderExt, Mpeg4IntWriterExt};
 pub use mdia::MdiaBox;
 pub use minf::MinfBox;
 pub use moov::MoovBox;
@@ -61,7 +61,7 @@ mod test {
         let not_a_real = NotARealBox { bar_ax: u64::MAX, foo_by: u32::MAX };
         assert_eq!(
             not_a_real.encoded_len(),
-            (<u64 as Mpeg4Int>::encoded_len() + <u32 as Mpeg4Int>::encoded_len()) as u64
+            (<u64 as Mp4Prim>::encoded_len() + <u32 as Mp4Prim>::encoded_len()) as u64
         );
     }
 

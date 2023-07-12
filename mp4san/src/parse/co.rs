@@ -7,7 +7,7 @@ use bytes::{BufMut, BytesMut};
 use crate::error::Result;
 
 use super::error::WhileParsingField;
-use super::{BoxType, FullBoxHeader, Mpeg4Int, Mpeg4IntWriterExt, ParseError, ParsedBox};
+use super::{BoxType, FullBoxHeader, Mp4Prim, Mpeg4IntWriterExt, ParseError, ParsedBox};
 
 #[derive(Clone, Debug, Default)]
 pub struct CoBox<T> {
@@ -26,7 +26,7 @@ impl<T> CoBox<T> {
     #[cfg(test)]
     pub(crate) fn with_entries<I: IntoIterator<Item = T>>(entries: I) -> Self
     where
-        T: Mpeg4Int,
+        T: Mp4Prim,
     {
         let mut entries_bytes = BytesMut::new();
         for entry in entries {
@@ -84,7 +84,7 @@ impl<T: Clone + Debug + 'static> ParsedBox for CoBox<T> {
     }
 }
 
-impl<T: Mpeg4Int> CoEntry<'_, T> {
+impl<T: Mp4Prim> CoEntry<'_, T> {
     pub fn get(&self) -> T {
         T::parse(&*self.data).unwrap_or_else(|_| unreachable!())
     }
