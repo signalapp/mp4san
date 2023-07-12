@@ -41,8 +41,12 @@ impl Mpeg4Int for FourCC {
         Ok(FourCC { value: Mpeg4Int::parse(buf).while_parsing_type::<Self>()? })
     }
 
+    fn encoded_len() -> u64 {
+        Self::size()
+    }
+
     fn put_buf<B: BufMut>(&self, mut buf: B) {
-        buf.put_mp4int(self.value);
+        buf.put_mp4int(&self.value);
     }
 }
 

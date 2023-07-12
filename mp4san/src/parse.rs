@@ -33,11 +33,9 @@ pub use mp4san_derive::{ParseBox, ParsedBox};
 
 #[cfg(test)]
 mod test {
-    use std::mem::size_of;
-
     use bytes::BytesMut;
 
-    use crate::parse::{BoxHeader, BoxType, BoxUuid, FourCC, ParseBox, ParsedBox};
+    use super::*;
 
     #[derive(Clone, Debug, PartialEq, ParseBox, ParsedBox)]
     #[box_type = b"\xffX0\x00"]
@@ -61,7 +59,10 @@ mod test {
     #[test]
     fn test_size_simple() {
         let not_a_real = NotARealBox { bar_ax: u64::MAX, foo_by: u32::MAX };
-        assert_eq!(not_a_real.encoded_len(), (size_of::<u64>() + size_of::<u32>()) as u64);
+        assert_eq!(
+            not_a_real.encoded_len(),
+            (<u64 as Mpeg4Int>::encoded_len() + <u32 as Mpeg4Int>::encoded_len()) as u64
+        );
     }
 
     #[test]

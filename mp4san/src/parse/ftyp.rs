@@ -1,14 +1,12 @@
 #![allow(missing_docs)]
 
-use std::mem::size_of;
-
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 use crate::error::Result;
 
 use super::error::{ParseResultExt, WhereEq, WhileParsingField};
 use super::mp4box::ParsedBox;
-use super::{BoxType, FourCC, Mpeg4IntReaderExt, ParseBox, ParseError};
+use super::{BoxType, FourCC, Mpeg4Int, Mpeg4IntReaderExt, ParseBox, ParseError};
 
 #[derive(Clone, Debug)]
 pub struct FtypBox {
@@ -55,7 +53,7 @@ impl ParseBox for FtypBox {
 
 impl ParsedBox for FtypBox {
     fn encoded_len(&self) -> u64 {
-        FourCC::size() + size_of::<u32>() as u64 + self.compatible_brands.len() as u64
+        FourCC::size() + <u32 as Mpeg4Int>::encoded_len() + self.compatible_brands.len() as u64
     }
 
     fn put_buf(&self, mut out: &mut dyn BufMut) {

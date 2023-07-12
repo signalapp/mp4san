@@ -10,8 +10,9 @@ use crate::error::Result;
 use super::error::WhileParsingType;
 use super::ParseError;
 
-pub trait Mpeg4Int: Clone + Copy + Sized {
+pub trait Mpeg4Int: Sized {
     fn parse<B: Buf>(buf: B) -> Result<Self, ParseError>;
+    fn encoded_len() -> u64;
     fn put_buf<B: BufMut>(&self, buf: B);
 }
 
@@ -22,7 +23,7 @@ pub trait Mpeg4IntReaderExt: Buf {
 }
 
 pub trait Mpeg4IntWriterExt: BufMut {
-    fn put_mp4int<T: Mpeg4Int>(&mut self, value: T) {
+    fn put_mp4int<T: Mpeg4Int>(&mut self, value: &T) {
         value.put_buf(self)
     }
 }
@@ -31,11 +32,15 @@ macro_rules! mpeg4_int {
     ($($ty:ty => ($get_fun:ident, $put_fun:ident)),+ $(,)?) => {
         $(impl Mpeg4Int for $ty {
             fn parse<B: Buf>(mut buf: B) -> Result<Self, ParseError> {
-                if buf.remaining() < size_of::<Self>() {
+                if buf.remaining() < Self::encoded_len() as usize {
                     use crate::parse::error::WhileParsingType;
                     bail_attach!(ParseError::TruncatedBox, WhileParsingType(stringify!($ty)));
                 }
                 Ok(buf.$get_fun())
+            }
+
+            fn encoded_len() -> u64 {
+                size_of::<Self>() as u64
             }
 
             fn put_buf<B: BufMut>(&self, mut buf: B) {
@@ -59,16 +64,20 @@ mpeg4_int! {
 impl<T: Mpeg4Int, const N: usize> Mpeg4Int for [T; N] {
     fn parse<B: Buf>(mut buf: B) -> Result<Self, ParseError> {
         ensure_attach!(
-            buf.remaining() >= size_of::<Self>(),
+            buf.remaining() >= Self::encoded_len() as usize,
             ParseError::TruncatedBox,
             WhileParsingType::new::<Self>(),
         );
         Ok([(); N].map(|()| T::parse(&mut buf).unwrap_or_else(|_| unreachable!())))
     }
 
+    fn encoded_len() -> u64 {
+        size_of::<Self>() as u64
+    }
+
     fn put_buf<B: BufMut>(&self, mut buf: B) {
         for value in self {
-            buf.put_mp4int(*value);
+            buf.put_mp4int(value);
         }
     }
 }

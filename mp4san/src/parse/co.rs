@@ -90,6 +90,6 @@ impl<T: Mpeg4Int> CoEntry<'_, T> {
     }
 
     pub fn set(&mut self, value: T) {
-        self.data.put_mp4int(value)
+        self.data.put_mp4int(&value)
     }
 }

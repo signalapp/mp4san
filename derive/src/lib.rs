@@ -196,7 +196,7 @@ fn sum_box_size(derive_input: &DeriveInput) -> TokenStream2 {
         Data::Struct(struct_data) => {
             let sum_expr = struct_data.fields.iter().map(|field| {
                 let ty = &field.ty;
-                quote_spanned! { field.span() => std::mem::size_of::<#ty>() as u64 }
+                quote_spanned! { field.span() => <#ty as mp4san::parse::Mpeg4Int>::encoded_len() }
             });
             quote! { #(+ #sum_expr)* }
         }
