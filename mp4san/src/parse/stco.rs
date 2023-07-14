@@ -1,51 +1,26 @@
 #![allow(missing_docs)]
 
-use bytes::{BufMut, BytesMut};
+use super::{ArrayEntryMut, BoundedArray, ConstFullBoxHeader, ParseBox, ParseError, ParsedBox};
 
-use crate::error::Result;
-
-use super::co::CoBox;
-use super::{ArrayEntryMut, BoxType, ParseBox, ParseError, ParsedBox};
-
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, ParseBox, ParsedBox)]
+#[box_type = "stco"]
 pub struct StcoBox {
-    inner: CoBox<u32>,
+    header: ConstFullBoxHeader,
+    entries: BoundedArray<u32, u32>,
 }
-
-const NAME: BoxType = BoxType::STCO;
 
 impl StcoBox {
     #[cfg(test)]
     pub(crate) fn with_entries<I: IntoIterator<Item = u32>>(entries: I) -> Self {
-        Self { inner: CoBox::with_entries(entries) }
+        Self { header: Default::default(), entries: BoundedArray::with_entries(entries) }
     }
 
     pub fn entries_mut(&mut self) -> impl Iterator<Item = ArrayEntryMut<'_, u32>> + ExactSizeIterator + '_ {
-        self.inner.entries_mut()
+        self.entries.entries_mut()
     }
 
     pub fn entry_count(&self) -> u32 {
-        self.inner.entry_count()
-    }
-}
-
-impl ParseBox for StcoBox {
-    fn parse(buf: &mut BytesMut) -> Result<Self, ParseError> {
-        Ok(Self { inner: CoBox::parse(buf, NAME)? })
-    }
-
-    fn box_type() -> BoxType {
-        NAME
-    }
-}
-
-impl ParsedBox for StcoBox {
-    fn encoded_len(&self) -> u64 {
-        self.inner.encoded_len()
-    }
-
-    fn put_buf(&self, buf: &mut dyn BufMut) {
-        self.inner.put_buf(buf)
+        self.entries.entry_count()
     }
 }
 

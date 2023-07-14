@@ -53,6 +53,10 @@ pub struct FullBoxHeader {
 }
 
 #[allow(missing_docs)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ConstFullBoxHeader<const VERSION: u8 = 0, const FLAGS: u32 = 0>;
+
+#[allow(missing_docs)]
 impl BoxHeader {
     pub const MAX_SIZE: u64 = 32;
 
@@ -293,6 +297,28 @@ impl Mp4Prim for FullBoxHeader {
     fn put_buf<B: BufMut>(&self, mut out: B) {
         out.put_u8(self.version);
         out.put_uint(self.flags.into(), 3);
+    }
+}
+
+impl<const VERSION: u8, const FLAGS: u32> From<ConstFullBoxHeader<VERSION, FLAGS>> for FullBoxHeader {
+    fn from(_: ConstFullBoxHeader<VERSION, FLAGS>) -> Self {
+        Self { version: VERSION, flags: FLAGS }
+    }
+}
+
+impl<const VERSION: u8, const FLAGS: u32> Mp4Prim for ConstFullBoxHeader<VERSION, FLAGS> {
+    fn parse<B: Buf>(buf: B) -> Result<Self, ParseError> {
+        FullBoxHeader::parse(buf)?.ensure_eq(&Self.into())?;
+        Ok(Self)
+    }
+
+    fn encoded_len() -> u64 {
+        FullBoxHeader::encoded_len()
+    }
+
+    fn put_buf<B: BufMut>(&self, mut out: B) {
+        out.put_u8(VERSION);
+        out.put_uint(FLAGS.into(), 3);
     }
 }
 

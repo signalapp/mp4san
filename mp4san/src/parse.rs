@@ -1,7 +1,6 @@
 //! Unstable API for parsing individual MP4 box types.
 
 mod array;
-pub(self) mod co;
 mod co64;
 pub mod error;
 mod fourcc;
@@ -22,7 +21,7 @@ pub use co64::Co64Box;
 pub use error::ParseError;
 pub use fourcc::FourCC;
 pub use ftyp::FtypBox;
-pub use header::{box_type, BoxHeader, BoxSize, BoxType, BoxUuid, FullBoxHeader};
+pub use header::{box_type, BoxHeader, BoxSize, BoxType, BoxUuid, ConstFullBoxHeader, FullBoxHeader};
 pub use integers::Mp4Prim;
 pub use mdia::MdiaBox;
 pub use minf::MinfBox;
