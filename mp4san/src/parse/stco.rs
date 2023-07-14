@@ -4,16 +4,12 @@ use bytes::{BufMut, BytesMut};
 
 use crate::error::Result;
 
-use super::co::{CoBox, CoEntry};
-use super::{BoxType, ParseBox, ParseError, ParsedBox};
+use super::co::CoBox;
+use super::{ArrayEntryMut, BoxType, ParseBox, ParseError, ParsedBox};
 
 #[derive(Clone, Debug, Default)]
 pub struct StcoBox {
     inner: CoBox<u32>,
-}
-
-pub struct StcoEntry<'a> {
-    inner: CoEntry<'a, u32>,
 }
 
 const NAME: BoxType = BoxType::STCO;
@@ -24,8 +20,8 @@ impl StcoBox {
         Self { inner: CoBox::with_entries(entries) }
     }
 
-    pub fn entries_mut(&mut self) -> impl Iterator<Item = StcoEntry<'_>> + ExactSizeIterator + '_ {
-        self.inner.entries_mut().map(|inner| StcoEntry { inner })
+    pub fn entries_mut(&mut self) -> impl Iterator<Item = ArrayEntryMut<'_, u32>> + ExactSizeIterator + '_ {
+        self.inner.entries_mut()
     }
 
     pub fn entry_count(&self) -> u32 {
@@ -50,16 +46,6 @@ impl ParsedBox for StcoBox {
 
     fn put_buf(&self, buf: &mut dyn BufMut) {
         self.inner.put_buf(buf)
-    }
-}
-
-impl StcoEntry<'_> {
-    pub fn get(&self) -> u32 {
-        self.inner.get()
-    }
-
-    pub fn set(&mut self, value: u32) {
-        self.inner.set(value)
     }
 }
 

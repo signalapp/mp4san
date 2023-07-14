@@ -6,7 +6,7 @@ use crate::error::Result;
 
 use super::error::{ParseResultExt, WhereEq, WhileParsingField};
 use super::mp4box::ParsedBox;
-use super::{BoxType, FourCC, Mp4Prim, Mpeg4IntReaderExt, ParseBox, ParseError};
+use super::{BoxType, FourCC, Mp4Prim, Mp4ValueReaderExt, ParseBox, ParseError};
 
 #[derive(Clone, Debug)]
 pub struct FtypBox {
@@ -31,8 +31,8 @@ impl FtypBox {
 
 impl ParseBox for FtypBox {
     fn parse(reader: &mut BytesMut) -> Result<Self, ParseError> {
-        let major_brand = reader.get().while_parsing_field(NAME, "major_brand")?;
-        let minor_version = reader.get().while_parsing_field(NAME, "minor_version")?;
+        let major_brand = reader.get_mp4_value().while_parsing_field(NAME, "major_brand")?;
+        let minor_version = reader.get_mp4_value().while_parsing_field(NAME, "minor_version")?;
 
         ensure_attach!(
             reader.remaining() % FourCC::size() as usize == 0,

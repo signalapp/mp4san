@@ -1,26 +1,19 @@
-use std::fmt::Debug;
-use std::marker::PhantomData;
-use std::mem::{size_of, take};
-
-use bytes::{BufMut, BytesMut};
+use bytes::BytesMut;
+use derive_where::derive_where;
 
 use crate::error::Result;
 
-use super::error::WhileParsingField;
-use super::{BoxType, FullBoxHeader, Mp4Prim, Mpeg4IntWriterExt, ParseError, ParsedBox};
+use super::error::{ParseResultExt, WhileParsingField};
+use super::{ArrayEntryMut, BoundedArray, BoxType, FullBoxHeader, Mp4Prim, Mp4ValueReaderExt, ParseError, ParsedBox};
 
-#[derive(Clone, Debug, Default)]
-pub struct CoBox<T> {
-    entries: BytesMut,
-    _t: PhantomData<T>,
+#[derive(Default, ParsedBox)]
+#[derive_where(Clone, Debug)]
+pub struct CoBox<T: Mp4Prim + 'static> {
+    header: FullBoxHeader,
+    entries: BoundedArray<u32, T>,
 }
 
-pub struct CoEntry<'a, T> {
-    data: &'a mut [u8],
-    _t: PhantomData<T>,
-}
-
-impl<T> CoBox<T> {
+impl<T: Mp4Prim> CoBox<T> {
     const FULL_BOX_HEADER: FullBoxHeader = FullBoxHeader::default();
 
     #[cfg(test)]
@@ -28,68 +21,28 @@ impl<T> CoBox<T> {
     where
         T: Mp4Prim,
     {
-        let mut entries_bytes = BytesMut::new();
-        for entry in entries {
-            entry.put_buf(&mut entries_bytes);
-        }
-        Self { entries: entries_bytes, _t: PhantomData }
+        Self { header: Self::FULL_BOX_HEADER, entries: BoundedArray::with_entries(entries) }
     }
 
-    pub fn parse(mut buf: &mut BytesMut, name: BoxType) -> Result<Self, ParseError> {
-        FullBoxHeader::parse(&mut buf)?.ensure_eq(&Self::FULL_BOX_HEADER)?;
+    pub fn parse(buf: &mut BytesMut, name: BoxType) -> Result<Self, ParseError> {
+        let header = <FullBoxHeader as Mp4Prim>::parse(&mut *buf)?;
+        header.ensure_eq(&Self::FULL_BOX_HEADER)?;
+        let entries = buf.get_mp4_value().while_parsing_field(name, "entries")?;
 
-        let entry_count = u32::parse(&mut buf)?;
-        let entries_len = size_of::<T>().checked_mul(entry_count as usize).ok_or_else(|| {
-            report_attach!(
-                ParseError::InvalidInput,
-                "overflow",
-                WhileParsingField(name, "entry_count"),
-            )
-        })?;
         ensure_attach!(
-            entries_len >= buf.len(),
+            buf.is_empty(),
             ParseError::InvalidInput,
             "extra unparsed data",
             WhileParsingField(name, "entries"),
         );
-        ensure_attach!(
-            entries_len <= buf.len(),
-            ParseError::TruncatedBox,
-            WhileParsingField(name, "entries"),
-        );
-        let entries = take(buf);
-        Ok(Self { entries, _t: PhantomData })
+        Ok(Self { header, entries })
     }
 
-    pub fn entries_mut(&mut self) -> impl Iterator<Item = CoEntry<'_, T>> + ExactSizeIterator + '_ {
-        self.entries
-            .chunks_exact_mut(size_of::<T>())
-            .map(|data| CoEntry { data, _t: PhantomData })
+    pub fn entries_mut(&mut self) -> impl Iterator<Item = ArrayEntryMut<'_, T>> + ExactSizeIterator + '_ {
+        self.entries.entries_mut()
     }
 
     pub fn entry_count(&self) -> u32 {
-        (self.entries.len() / size_of::<T>()) as u32
-    }
-}
-
-impl<T: Clone + Debug + 'static> ParsedBox for CoBox<T> {
-    fn encoded_len(&self) -> u64 {
-        Self::FULL_BOX_HEADER.encoded_len() + size_of::<u32>() as u64 + self.entries.len() as u64
-    }
-
-    fn put_buf(&self, buf: &mut dyn BufMut) {
-        Self::FULL_BOX_HEADER.put_buf(&mut *buf);
-        buf.put_u32(self.entry_count());
-        buf.put_slice(&self.entries[..])
-    }
-}
-
-impl<T: Mp4Prim> CoEntry<'_, T> {
-    pub fn get(&self) -> T {
-        T::parse(&*self.data).unwrap_or_else(|_| unreachable!())
-    }
-
-    pub fn set(&mut self, value: T) {
-        self.data.put_mp4int(&value)
+        self.entries.entry_count()
     }
 }

@@ -441,16 +441,18 @@ pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(
                 let co = trak?.co_mut()?;
                 if let StblCoMut::Stco(stco) = co {
                     for mut entry in &mut stco.entries_mut() {
+                        let value = entry.get().unwrap_or_else(|_| unreachable!());
                         entry.set(
-                            checked_add_signed(entry.get(), mdat_displacement).ok_or_else(|| {
+                            checked_add_signed(value, mdat_displacement).ok_or_else(|| {
                                 report_attach!(ParseError::InvalidInput, "chunk offset not within mdat")
                             })?,
                         );
                     }
                 } else if let StblCoMut::Co64(co64) = co {
                     for mut entry in &mut co64.entries_mut() {
+                        let value = entry.get().unwrap_or_else(|_| unreachable!());
                         entry.set(
-                            checked_add_signed(entry.get(), mdat_displacement.into()).ok_or_else(|| {
+                            checked_add_signed(value, mdat_displacement.into()).ok_or_else(|| {
                                 report_attach!(ParseError::InvalidInput, "chunk offset not within mdat")
                             })?,
                         );

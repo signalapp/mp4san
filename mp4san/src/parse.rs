@@ -1,5 +1,6 @@
 //! Unstable API for parsing individual MP4 box types.
 
+mod array;
 pub(self) mod co;
 mod co64;
 pub mod error;
@@ -14,20 +15,23 @@ mod mp4box;
 mod stbl;
 mod stco;
 mod trak;
+mod value;
 
-pub use co64::{Co64Box, Co64Entry};
+pub use array::{ArrayEntry, ArrayEntryMut, BoundedArray, UnboundedArray};
+pub use co64::Co64Box;
 pub use error::ParseError;
 pub use fourcc::FourCC;
 pub use ftyp::FtypBox;
 pub use header::{box_type, BoxHeader, BoxSize, BoxType, BoxUuid, FullBoxHeader};
-pub use integers::{Mp4Prim, Mpeg4IntReaderExt, Mpeg4IntWriterExt};
+pub use integers::Mp4Prim;
 pub use mdia::MdiaBox;
 pub use minf::MinfBox;
 pub use moov::MoovBox;
 pub use mp4box::{AnyMp4Box, BoxData, Boxes, Mp4Box, ParseBox, ParsedBox};
 pub use stbl::{StblBox, StblCoMut};
-pub use stco::{StcoBox, StcoEntry};
+pub use stco::StcoBox;
 pub use trak::TrakBox;
+pub use value::{Mp4Value, Mp4ValueReaderExt, Mp4ValueWriterExt};
 
 pub use mp4san_derive::{ParseBox, ParsedBox};
 
@@ -55,6 +59,14 @@ mod test {
     #[derive(Clone, Debug, PartialEq, ParseBox, ParsedBox)]
     #[box_type = "xa04"]
     pub struct Fifth;
+
+    #[derive(Clone, Debug, ParseBox, ParsedBox)]
+    #[box_type = "test"]
+    pub struct ArrayBox {
+        pub array_32: BoundedArray<u32, i32>,
+        pub array_16: BoundedArray<u16, i16>,
+        pub unbounded_array: UnboundedArray<u8>,
+    }
 
     #[test]
     fn test_size_simple() {

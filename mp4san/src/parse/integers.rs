@@ -8,24 +8,12 @@ use bytes::BufMut;
 use crate::error::Result;
 
 use super::error::WhileParsingType;
-use super::ParseError;
+use super::{Mp4ValueWriterExt, ParseError};
 
 pub trait Mp4Prim: Sized {
     fn parse<B: Buf>(buf: B) -> Result<Self, ParseError>;
     fn encoded_len() -> u64;
     fn put_buf<B: BufMut>(&self, buf: B);
-}
-
-pub trait Mpeg4IntReaderExt: Buf {
-    fn get<T: Mp4Prim>(&mut self) -> Result<T, ParseError> {
-        T::parse(self)
-    }
-}
-
-pub trait Mpeg4IntWriterExt: BufMut {
-    fn put_mp4int<T: Mp4Prim>(&mut self, value: &T) {
-        value.put_buf(self)
-    }
 }
 
 macro_rules! mp4_int {
@@ -77,11 +65,7 @@ impl<T: Mp4Prim, const N: usize> Mp4Prim for [T; N] {
 
     fn put_buf<B: BufMut>(&self, mut buf: B) {
         for value in self {
-            buf.put_mp4int(value);
+            buf.put_mp4_value(value);
         }
     }
 }
-
-impl<T: Buf> Mpeg4IntReaderExt for T {}
-
-impl<T: BufMut> Mpeg4IntWriterExt for T {}

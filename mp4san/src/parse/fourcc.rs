@@ -7,8 +7,7 @@ use futures_util::{pin_mut, AsyncRead, AsyncReadExt};
 use crate::error::Result;
 
 use super::error::ParseResultExt;
-use super::integers::Mpeg4IntWriterExt;
-use super::{Mp4Prim, ParseError};
+use super::{Mp4Prim, Mp4ValueWriterExt, ParseError};
 
 /// A four-byte character code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,7 +45,7 @@ impl Mp4Prim for FourCC {
     }
 
     fn put_buf<B: BufMut>(&self, mut buf: B) {
-        buf.put_mp4int(&self.value);
+        buf.put_mp4_value(&self.value);
     }
 }
 
