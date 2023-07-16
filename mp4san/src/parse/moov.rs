@@ -1,23 +1,23 @@
 #![allow(missing_docs)]
 
-use bytes::{BufMut, BytesMut};
-
 use crate::error::Result;
 
 use super::error::{ParseResultExt, WhileParsingField};
-use super::mp4box::Boxes;
-use super::{BoxType, ParseBox, ParseError, ParsedBox, TrakBox};
+use super::{BoxType, Boxes, BoxesValidator, ParseBox, ParseError, ParsedBox, TrakBox};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, ParseBox, ParsedBox)]
+#[box_type = "moov"]
 pub struct MoovBox {
-    children: Boxes,
+    children: Boxes<MoovChildrenValidator>,
 }
+
+pub(crate) struct MoovChildrenValidator;
 
 const NAME: BoxType = BoxType::MOOV;
 
 impl MoovBox {
     #[cfg(test)]
-    pub(crate) fn with_children<C: Into<Boxes>>(children: C) -> Self {
+    pub(crate) fn with_children<C: Into<Boxes<MoovChildrenValidator>>>(children: C) -> Self {
         Self { children: children.into() }
     }
 
@@ -26,39 +26,23 @@ impl MoovBox {
             .get_mut()
             .map(|result| result.while_parsing_child(NAME, BoxType::TRAK))
     }
-
-    pub fn encoded_len(&self) -> u64 {
-        self.children.encoded_len()
-    }
 }
 
-impl ParseBox for MoovBox {
-    fn parse(buf: &mut BytesMut) -> Result<Self, ParseError> {
-        let children = Boxes::parse(buf).while_parsing_field(NAME, "children")?;
+impl BoxesValidator for MoovChildrenValidator {
+    fn validate<V>(children: &Boxes<V>) -> Result<(), ParseError> {
         ensure_attach!(
             children.box_types().any(|box_type| box_type == BoxType::TRAK),
             ParseError::MissingRequiredBox(BoxType::TRAK),
             WhileParsingField(NAME, "children"),
         );
-        Ok(Self { children })
-    }
-
-    fn box_type() -> BoxType {
-        NAME
-    }
-}
-impl ParsedBox for MoovBox {
-    fn encoded_len(&self) -> u64 {
-        self.children.encoded_len()
-    }
-
-    fn put_buf(&self, out: &mut dyn BufMut) {
-        self.children.put_buf(out);
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod test {
+    use bytes::BytesMut;
+
     use crate::parse::Mp4Box;
 
     use super::*;

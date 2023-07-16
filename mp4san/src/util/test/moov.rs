@@ -38,11 +38,11 @@ impl TestMoovBuilder {
         let mut stbl = vec![test_stsd(), test_stts(chunk_count), test_stsc(), test_stsz(chunk_count)];
         if spec.co64 {
             let entries = spec.co_entries.iter().cloned();
-            stbl.push(Mp4Box::with_data(Co64Box::with_entries(entries).into()).unwrap().into());
+            stbl.push(Mp4Box::with_data(Co64Box::from_iter(entries).into()).unwrap().into());
         }
         if spec.stco {
             let entries = spec.co_entries.into_iter().map(|entry| entry as u32);
-            stbl.push(Mp4Box::with_data(StcoBox::with_entries(entries).into()).unwrap().into());
+            stbl.push(Mp4Box::with_data(StcoBox::from_iter(entries).into()).unwrap().into());
         }
 
         let mut minf = vec![test_dinf()];

@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
 
 use std::fmt::Debug;
+use std::marker::PhantomData;
 use std::mem::take;
 use std::pin::Pin;
 use std::result::Result as StdResult;
@@ -18,7 +19,7 @@ use crate::util::IoResultExt;
 use crate::{stream_len, stream_position, AsyncSkip, BoxDataTooLarge, Error};
 
 use super::error::{MultipleBoxes, ParseResultExt, WhileParsingBox};
-use super::{BoxHeader, BoxType, ParseError};
+use super::{BoxHeader, BoxType, Mp4Value, ParseError};
 
 #[derive(Debug)]
 #[derive_where(Clone; BoxData<T>)]
@@ -49,9 +50,17 @@ pub trait ParsedBox: Clone + Debug + Downcast {
     fn put_buf(&self, out: &mut dyn BufMut);
 }
 
-#[derive(Clone, Debug, Default, From)]
-pub struct Boxes {
+#[derive(From)]
+#[derive_where(Clone, Debug, Default)]
+pub struct Boxes<V = ()> {
     boxes: Vec<AnyMp4Box>,
+    _validator: PhantomData<V>,
+}
+
+pub trait BoxesValidator {
+    fn validate<V>(_boxes: &Boxes<V>) -> Result<(), ParseError> {
+        Ok(())
+    }
 }
 
 impl<T: ParsedBox + ?Sized> Mp4Box<T> {
@@ -60,12 +69,6 @@ impl<T: ParsedBox + ?Sized> Mp4Box<T> {
         T: ParseBox,
     {
         let parsed_header = BoxHeader::with_data_size(T::box_type(), data.encoded_len())?;
-        Ok(Self { parsed_header, data })
-    }
-
-    pub fn parse(mut buf: &mut BytesMut) -> Result<Self, ParseError> {
-        let parsed_header = BoxHeader::parse(&mut buf).while_parsing_type::<Self>()?;
-        let data = BoxData::get_from_bytes_mut(buf, &parsed_header).while_parsing_type::<Self>()?;
         Ok(Self { parsed_header, data })
     }
 
@@ -118,14 +121,22 @@ impl<T: ParsedBox + ?Sized> Mp4Box<T> {
         }
         self.data.parse_as()
     }
+}
 
-    pub fn encoded_len(&self) -> u64 {
+impl<T: ParsedBox + ?Sized> Mp4Value for Mp4Box<T> {
+    fn parse(mut buf: &mut BytesMut) -> Result<Self, ParseError> {
+        let parsed_header = BoxHeader::parse(&mut buf).while_parsing_type::<Self>()?;
+        let data = BoxData::get_from_bytes_mut(buf, &parsed_header).while_parsing_type::<Self>()?;
+        Ok(Self { parsed_header, data })
+    }
+
+    fn encoded_len(&self) -> u64 {
         self.calculated_header().encoded_len() + self.data.encoded_len()
     }
 
-    pub fn put_buf<B: BufMut>(&self, mut out: B) {
-        self.calculated_header().put_buf(&mut out);
-        self.data.put_buf(&mut out);
+    fn put_buf<B: BufMut>(&self, mut buf: B) {
+        self.calculated_header().put_buf(&mut buf);
+        self.data.put_buf(&mut buf);
     }
 }
 
@@ -255,27 +266,9 @@ impl<'a, T: ParsedBox + 'a> From<T> for Box<dyn ParsedBox + 'a> {
 // Boxes impls
 //
 
-impl Boxes {
-    pub fn parse(buf: &mut BytesMut) -> Result<Self, ParseError> {
-        let mut boxes = Vec::new();
-        while buf.has_remaining() {
-            boxes.push(Mp4Box::parse(buf).while_parsing_type::<Self>()?);
-        }
-        Ok(Self { boxes })
-    }
-
+impl<V> Boxes<V> {
     pub fn box_types(&self) -> impl Iterator<Item = BoxType> + ExactSizeIterator + '_ {
         self.boxes.iter().map(|mp4box| mp4box.parsed_header.box_type())
-    }
-
-    pub fn encoded_len(&self) -> u64 {
-        self.boxes.iter().map(Mp4Box::encoded_len).sum()
-    }
-
-    pub fn put_buf<B: BufMut>(&self, mut out: B) {
-        for mp4box in &self.boxes {
-            mp4box.put_buf(&mut out);
-        }
     }
 
     pub fn get_mut<T: ParseBox + ParsedBox>(&mut self) -> impl Iterator<Item = Result<&mut T, ParseError>> {
@@ -295,3 +288,37 @@ impl Boxes {
             .ok_or_else(|| ParseError::MissingRequiredBox(T::box_type()))?
     }
 }
+
+impl<V: BoxesValidator> Mp4Value for Boxes<V> {
+    fn parse(buf: &mut BytesMut) -> Result<Self, ParseError> {
+        let mut boxes = Vec::new();
+        while buf.has_remaining() {
+            boxes.push(Mp4Box::parse(buf).while_parsing_type::<Self>()?);
+        }
+        let boxes = Self { boxes, _validator: PhantomData };
+        V::validate(&boxes)?;
+        Ok(boxes)
+    }
+
+    fn encoded_len(&self) -> u64 {
+        self.boxes.iter().map(Mp4Box::encoded_len).sum()
+    }
+
+    fn put_buf<B: BufMut>(&self, mut out: B) {
+        for mp4box in &self.boxes {
+            mp4box.put_buf(&mut out);
+        }
+    }
+}
+
+impl<V> From<Vec<AnyMp4Box>> for Boxes<V> {
+    fn from(boxes: Vec<AnyMp4Box>) -> Self {
+        Self { boxes, _validator: PhantomData }
+    }
+}
+
+//
+// BoxesValidator impls
+//
+
+impl BoxesValidator for () {}

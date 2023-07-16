@@ -10,17 +10,18 @@ pub struct Co64Box {
 }
 
 impl Co64Box {
-    #[cfg(test)]
-    pub(crate) fn with_entries<I: IntoIterator<Item = u64>>(entries: I) -> Self {
-        Self { header: Default::default(), entries: BoundedArray::with_entries(entries) }
-    }
-
     pub fn entries_mut(&mut self) -> impl Iterator<Item = ArrayEntryMut<'_, u64>> + ExactSizeIterator + '_ {
         self.entries.entries_mut()
     }
 
     pub fn entry_count(&self) -> u32 {
         self.entries.entry_count()
+    }
+}
+
+impl FromIterator<u64> for Co64Box {
+    fn from_iter<I: IntoIterator<Item = u64>>(entries: I) -> Self {
+        Self { header: Default::default(), entries: entries.into_iter().collect() }
     }
 }
 

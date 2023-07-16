@@ -10,17 +10,18 @@ pub struct StcoBox {
 }
 
 impl StcoBox {
-    #[cfg(test)]
-    pub(crate) fn with_entries<I: IntoIterator<Item = u32>>(entries: I) -> Self {
-        Self { header: Default::default(), entries: BoundedArray::with_entries(entries) }
-    }
-
     pub fn entries_mut(&mut self) -> impl Iterator<Item = ArrayEntryMut<'_, u32>> + ExactSizeIterator + '_ {
         self.entries.entries_mut()
     }
 
     pub fn entry_count(&self) -> u32 {
         self.entries.entry_count()
+    }
+}
+
+impl FromIterator<u32> for StcoBox {
+    fn from_iter<I: IntoIterator<Item = u32>>(entries: I) -> Self {
+        Self { header: Default::default(), entries: entries.into_iter().collect() }
     }
 }
 

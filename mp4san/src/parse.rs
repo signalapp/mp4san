@@ -26,7 +26,7 @@ pub use integers::Mp4Prim;
 pub use mdia::MdiaBox;
 pub use minf::MinfBox;
 pub use moov::MoovBox;
-pub use mp4box::{AnyMp4Box, BoxData, Boxes, Mp4Box, ParseBox, ParsedBox};
+pub use mp4box::{AnyMp4Box, BoxData, Boxes, BoxesValidator, Mp4Box, ParseBox, ParsedBox};
 pub use stbl::{StblBox, StblCoMut};
 pub use stco::StcoBox;
 pub use trak::TrakBox;

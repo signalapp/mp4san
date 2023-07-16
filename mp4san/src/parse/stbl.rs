@@ -1,14 +1,12 @@
 #![allow(missing_docs)]
 
-use bytes::{BufMut, BytesMut};
-
 use crate::error::Result;
 
 use super::error::{ParseResultExt, WhileParsingChild};
-use super::mp4box::{Boxes, ParseBox};
-use super::{BoxType, Co64Box, ParseError, ParsedBox, StcoBox};
+use super::{BoxType, Boxes, Co64Box, ParseBox, ParseError, ParsedBox, StcoBox};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, ParseBox, ParsedBox)]
+#[box_type = "stbl"]
 pub struct StblBox {
     children: Boxes,
 }
@@ -49,27 +47,6 @@ impl StblBox {
                 .while_parsing_child(NAME, CO64)
                 .map(StblCoMut::Co64)
         }
-    }
-}
-
-impl ParseBox for StblBox {
-    fn parse(buf: &mut BytesMut) -> Result<Self, ParseError> {
-        let children = Boxes::parse(buf).while_parsing_field(NAME, "children")?;
-        Ok(Self { children })
-    }
-
-    fn box_type() -> BoxType {
-        NAME
-    }
-}
-
-impl ParsedBox for StblBox {
-    fn encoded_len(&self) -> u64 {
-        self.children.encoded_len()
-    }
-
-    fn put_buf(&self, buf: &mut dyn BufMut) {
-        self.children.put_buf(buf)
     }
 }
 

@@ -41,16 +41,7 @@ pub struct ArrayEntryMut<'a, T> {
 // BoundedArray impls
 //
 
-impl<C: From<u32> + Clone, T: Mp4Prim> BoundedArray<C, T> {
-    #[cfg(test)]
-    pub(crate) fn with_entries<I: IntoIterator<Item = T>>(entries: I) -> Self
-    where
-        T: Mp4Prim,
-    {
-        let array = UnboundedArray::with_entries(entries);
-        Self { entry_count: (array.entry_count() as u32).into(), array }
-    }
-
+impl<C: Clone, T: Mp4Prim> BoundedArray<C, T> {
     pub fn entries(&self) -> impl Iterator<Item = ArrayEntry<'_, T>> + ExactSizeIterator + '_ {
         self.array.entries()
     }
@@ -90,20 +81,18 @@ impl<C: Mp4Prim + Into<u32> + Clone, T: Mp4Prim> Mp4Value for BoundedArray<C, T>
     }
 }
 
+impl<C: From<u32>, T: Mp4Prim> FromIterator<T> for BoundedArray<C, T> {
+    fn from_iter<I: IntoIterator<Item = T>>(entries: I) -> Self {
+        let array = UnboundedArray::from_iter(entries);
+        Self { entry_count: (array.entry_count() as u32).into(), array }
+    }
+}
+
 //
 // UnboundedArray impls
 //
 
 impl<T: Mp4Prim> UnboundedArray<T> {
-    #[cfg(test)]
-    pub(crate) fn with_entries<I: IntoIterator<Item = T>>(entries: I) -> Self {
-        let mut entries_bytes = BytesMut::new();
-        for entry in entries {
-            entry.put_buf(&mut entries_bytes);
-        }
-        Self { entries: entries_bytes, _t: PhantomData }
-    }
-
     pub fn entries(&self) -> impl Iterator<Item = ArrayEntry<'_, T>> + ExactSizeIterator + '_ {
         self.entries
             .chunks_exact(T::encoded_len() as usize)
@@ -133,6 +122,16 @@ impl<T: Mp4Prim> Mp4Value for UnboundedArray<T> {
 
     fn put_buf<B: BufMut>(&self, mut buf: B) {
         buf.put_slice(&self.entries[..])
+    }
+}
+
+impl<T: Mp4Prim> FromIterator<T> for UnboundedArray<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(entries: I) -> Self {
+        let mut entries_bytes = BytesMut::new();
+        for entry in entries {
+            entry.put_buf(&mut entries_bytes);
+        }
+        Self { entries: entries_bytes, _t: PhantomData }
     }
 }
 

@@ -7,7 +7,7 @@ use derive_builder::Builder;
 use mp4san_test::{ffmpeg_assert_eq, gpac_assert_eq};
 
 use crate::parse::box_type::{FREE, FTYP, MDAT, MECO, META, MOOV, SKIP};
-use crate::parse::BoxType;
+use crate::parse::{BoxType, Mp4Value};
 use crate::{sanitize, sanitize_with_config, Config, InputSpan, SanitizedMetadata, Skip};
 
 use super::{

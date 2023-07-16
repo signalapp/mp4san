@@ -70,7 +70,7 @@ use futures_util::{pin_mut, AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncSeek}
 
 use crate::error::Report;
 use crate::parse::error::{MultipleBoxes, WhileParsingBox};
-use crate::parse::{BoxHeader, BoxType, FourCC, FtypBox, MoovBox, Mp4Box, ParseError, StblCoMut};
+use crate::parse::{BoxHeader, BoxType, FourCC, FtypBox, MoovBox, Mp4Box, Mp4Value, ParseError, StblCoMut};
 use crate::util::{checked_add_signed, IoResultExt};
 
 //
