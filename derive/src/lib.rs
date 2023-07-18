@@ -114,7 +114,7 @@ fn derive_read_fn(input: &DeriveInput) -> TokenStream2 {
                         return
                             mp4san::parse::error::__ParseResultExt::while_parsing_box(
                                 mp4san::error::__ResultExt::attach_printable(
-                                    Err(ParseError::InvalidInput.into()),
+                                    Err(mp4san::parse::ParseError::InvalidInput.into()),
                                     "extra unparsed data",
                                 ),
                                 #ident::box_type(),

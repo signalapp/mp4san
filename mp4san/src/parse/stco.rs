@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use super::{ArrayEntryMut, BoundedArray, ConstFullBoxHeader, ParseBox, ParseError, ParsedBox};
+use super::{ArrayEntryMut, BoundedArray, ConstFullBoxHeader, ParseBox, ParsedBox};
 
 #[derive(Clone, Debug, Default, ParseBox, ParsedBox)]
 #[box_type = "stco"]
