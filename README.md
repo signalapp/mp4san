@@ -1,4 +1,4 @@
-# mp4san
+# mp4san &emsp; [![Fuzzing Status](https://oss-fuzz-build-logs.storage.googleapis.com/badges/mp4san.svg)](https://oss-fuzz.com/coverage-report/job/libfuzzer_asan_mp4san/latest)
 
 A Rust MP4 format "sanitizer".
 
@@ -79,6 +79,32 @@ sizes.
 ```shell
 $ cargo run --bin mp4san-test-gen -- test-sample.mp4 mp4san/tests/test-data/test-sample.mp4.gz
 ```
+
+### Fuzz Testing
+
+Fuzz testing via both `cargo afl` and `cargo fuzz` is supported. See [the Rust Fuzz Book](https://rust-fuzz.github.io/book/) for more details. To run AFL-based fuzzing:
+
+```shell
+$ cargo install afl
+$ cd fuzz-afl
+$ ./fuzz $num_cpus
+```
+
+To run libFuzzer-based fuzzing:
+
+```shell
+$ cargo +nightly install cargo-fuzz
+$ cd mp4san
+$ cargo +nightly fuzz run sanitize -- -dict=fuzz/mp4.dict -seed_inputs=fuzz/input/ffmpeg-black-1f.mp4,fuzz/input/ffmpeg-smptebars-30f.mp4
+```
+
+### OSS-Fuzz
+
+Continuous fuzz testing is also provided by [OSS-Fuzz](https://google.github.io/oss-fuzz/).
+
+[Build Status](https://oss-fuzz-build-logs.storage.googleapis.com/index.html#mp4san)  
+[Code Coverage](https://oss-fuzz.com/coverage-report/job/libfuzzer_asan_mp4san/latest)  
+[Bugs Found](https://bugs.chromium.org/p/oss-fuzz/issues/list?sort=-opened&can=1&q=proj:mp4san)  
 
 ## License
 
