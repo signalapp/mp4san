@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
 
 use std::fmt::Debug;
+use std::iter;
 use std::marker::PhantomData;
 use std::mem::take;
 use std::pin::Pin;
@@ -16,7 +17,7 @@ use futures_util::{AsyncRead, AsyncReadExt};
 use mediasan_common::error::WhileParsingType;
 use mediasan_common::{AsyncSkipExt, ResultExt};
 
-use crate::error::Result;
+use crate::error::{Report, Result};
 use crate::parse::error::ParseResultExt;
 use crate::util::IoResultExt;
 use crate::{AsyncSkip, BoxDataTooLarge, Error};
@@ -57,14 +58,37 @@ pub trait ParsedBox: Clone + Debug + Downcast {
 #[derive_where(Clone, Debug, Default)]
 pub struct Boxes<V = ()> {
     boxes: Vec<AnyMp4Box>,
-    _validator: PhantomData<V>,
+    _typed: PhantomData<V>,
 }
 
-pub trait BoxesValidator {
-    fn validate<V>(_boxes: &Boxes<V>) -> Result<(), ParseError> {
-        Ok(())
+pub trait ParseBoxes: Sized {
+    type Ref<'a>
+    where
+        Self: 'a;
+    type RefMut<'a>
+    where
+        Self: 'a;
+
+    type IntoIter: Iterator<Item = AnyMp4Box>;
+
+    fn validate(boxes: &mut [AnyMp4Box]) -> Result<(), ParseError> {
+        Self::parse(boxes).map(drop)
     }
+
+    fn parse<'a>(boxes: &'a mut [AnyMp4Box]) -> Result<Self::RefMut<'a>, ParseError>
+    where
+        Self: 'a;
+
+    fn parsed<'a>(boxes: &'a [AnyMp4Box]) -> Self::Ref<'a>
+    where
+        Self: 'a;
+
+    fn try_into_iter(self) -> Result<Self::IntoIter, ParseError>;
 }
+
+//
+// Mp4Box impls
+//
 
 impl<T: ParsedBox + ?Sized> Mp4Box<T> {
     pub fn with_data(data: BoxData<T>) -> Result<Self, ParseError>
@@ -73,6 +97,13 @@ impl<T: ParsedBox + ?Sized> Mp4Box<T> {
     {
         let parsed_header = BoxHeader::with_data_size(T::NAME, data.encoded_len())?;
         Ok(Self { parsed_header, data })
+    }
+
+    pub fn with_parsed(data: Box<T>) -> Result<Self, ParseError>
+    where
+        T: ParseBox,
+    {
+        Self::with_data(BoxData::from(data))
     }
 
     /// Read and parse a box's data assuming its header has already been read.
@@ -116,6 +147,10 @@ impl<T: ParsedBox + ?Sized> Mp4Box<T> {
             }
             _ => self.parsed_header,
         }
+    }
+
+    pub fn box_type(&self) -> BoxType {
+        self.parsed_header.box_type()
     }
 
     pub fn parse_data_as<U: ParseBox + ParsedBox + Into<Box<T>>>(&mut self) -> Result<Option<&mut U>, ParseError> {
@@ -202,6 +237,13 @@ impl<T: ParsedBox + ?Sized> BoxData<T> {
         }
     }
 
+    pub fn parsed<U: ParsedBox>(&self) -> Option<&U> {
+        let BoxData::Parsed(parsed) = self else { return None };
+        // This is subtle because of the generic T; we have to make sure Downcast::as_any_mut is called on T and
+        // not on Box<T>, or the subsequent Any::downcast_ref::<U>() will fail.
+        <T>::as_any(parsed).downcast_ref()
+    }
+
     fn parse_as<U: ParseBox + ParsedBox + Into<Box<T>>>(&mut self) -> Result<Option<&mut U>, ParseError> {
         if let BoxData::Bytes(data) = self {
             let parsed = U::parse(data).while_parsing_box(U::NAME)?;
@@ -269,6 +311,21 @@ impl<'a, T: ParsedBox + 'a> From<T> for Box<dyn ParsedBox + 'a> {
 // Boxes impls
 //
 
+impl<V: ParseBoxes> Boxes<V> {
+    pub fn new(typed: V, untyped: impl IntoIterator<Item = AnyMp4Box>) -> Result<Self, ParseError> {
+        let boxes = typed.try_into_iter()?.chain(untyped).collect();
+        Ok(Self { boxes, _typed: PhantomData })
+    }
+
+    pub fn parsed(&self) -> V::Ref<'_> {
+        V::parsed(&self.boxes)
+    }
+
+    pub fn parsed_mut(&mut self) -> V::RefMut<'_> {
+        V::parse(&mut self.boxes).unwrap_or_else(|_| unreachable!())
+    }
+}
+
 impl<V> Boxes<V> {
     pub fn box_types(&self) -> impl Iterator<Item = BoxType> + ExactSizeIterator + '_ {
         self.boxes.iter().map(|mp4box| mp4box.parsed_header.box_type())
@@ -290,16 +347,24 @@ impl<V> Boxes<V> {
             .next()
             .ok_or_else(|| ParseError::MissingRequiredBox(T::NAME))?
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = &AnyMp4Box> + '_ {
+        self.boxes.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut AnyMp4Box> + '_ {
+        self.boxes.iter_mut()
+    }
 }
 
-impl<V: BoxesValidator> Mp4Value for Boxes<V> {
+impl<V: ParseBoxes> Mp4Value for Boxes<V> {
     fn parse(buf: &mut BytesMut) -> Result<Self, ParseError> {
         let mut boxes = Vec::new();
         while buf.has_remaining() {
             boxes.push(Mp4Box::parse(buf)?);
         }
-        let boxes = Self { boxes, _validator: PhantomData };
-        V::validate(&boxes)?;
+        V::validate(&mut boxes)?;
+        let boxes = Self { boxes, _typed: PhantomData };
         Ok(boxes)
     }
 
@@ -314,14 +379,60 @@ impl<V: BoxesValidator> Mp4Value for Boxes<V> {
     }
 }
 
-impl<V> From<Vec<AnyMp4Box>> for Boxes<V> {
-    fn from(boxes: Vec<AnyMp4Box>) -> Self {
-        Self { boxes, _validator: PhantomData }
+impl<V: ParseBoxes> TryFrom<Vec<AnyMp4Box>> for Boxes<V> {
+    type Error = Report<ParseError>;
+
+    fn try_from(mut boxes: Vec<AnyMp4Box>) -> Result<Self, ParseError> {
+        V::validate(&mut boxes)?;
+        Ok(Self { boxes, _typed: PhantomData })
+    }
+}
+
+impl<'a, V> IntoIterator for &'a Boxes<V> {
+    type Item = &'a AnyMp4Box;
+
+    // TODO when stabilizing the API, replace this with a wrapper.
+    type IntoIter = std::slice::Iter<'a, AnyMp4Box>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.boxes.iter()
+    }
+}
+
+impl<'a, V> IntoIterator for &'a mut Boxes<V> {
+    type Item = &'a mut AnyMp4Box;
+
+    // TODO when stabilizing the API, replace this with a wrapper.
+    type IntoIter = std::slice::IterMut<'a, AnyMp4Box>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.boxes.iter_mut()
     }
 }
 
 //
-// BoxesValidator impls
+// ParseBoxes impls
 //
 
-impl BoxesValidator for () {}
+impl ParseBoxes for () {
+    type Ref<'a> = ();
+    type RefMut<'a> = ();
+    type IntoIter = iter::Empty<AnyMp4Box>;
+
+    fn parse<'a>(_boxes: &'a mut [AnyMp4Box]) -> Result<Self, ParseError>
+    where
+        Self: 'a,
+    {
+        Ok(())
+    }
+
+    fn parsed<'a>(_boxes: &'a [AnyMp4Box]) -> Self::Ref<'a>
+    where
+        Self: 'a,
+    {
+    }
+
+    fn try_into_iter(self) -> Result<Self::IntoIter, ParseError> {
+        Ok(iter::empty())
+    }
+}
