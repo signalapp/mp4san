@@ -85,7 +85,7 @@ $ cargo run --bin mp4san-test-gen -- test-sample.mp4 mp4san/tests/test-data/test
 Fuzz testing via both `cargo afl` and `cargo fuzz` is supported. See [the Rust Fuzz Book](https://rust-fuzz.github.io/book/) for more details. To run AFL-based fuzzing:
 
 ```shell
-$ cargo install afl
+$ cargo install cargo-afl
 $ cd fuzz-afl
 $ ./fuzz $num_cpus
 ```
