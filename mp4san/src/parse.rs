@@ -2,6 +2,7 @@
 
 mod array;
 mod co64;
+pub mod derive;
 pub mod error;
 mod ftyp;
 mod header;
@@ -21,17 +22,17 @@ pub use error::ParseError;
 pub use ftyp::FtypBox;
 pub use header::{box_type, fourcc, BoxHeader, BoxSize, BoxType, BoxUuid, ConstFullBoxHeader, FullBoxHeader};
 pub use integers::Mp4Prim;
-pub use mdia::MdiaBox;
-pub use minf::MinfBox;
-pub use moov::MoovBox;
-pub use mp4box::{AnyMp4Box, BoxData, Boxes, BoxesValidator, Mp4Box, ParseBox, ParsedBox};
-pub use stbl::{StblBox, StblCoMut};
+pub use mdia::{MdiaBox, MdiaChildren, MdiaChildrenRef, MdiaChildrenRefMut};
+pub use minf::{MinfBox, MinfChildren, MinfChildrenRef, MinfChildrenRefMut};
+pub use moov::{MoovBox, MoovChildren, MoovChildrenRef, MoovChildrenRefMut};
+pub use mp4box::{AnyMp4Box, BoxData, Boxes, Mp4Box, ParseBox, ParseBoxes, ParsedBox};
+pub use stbl::{StblBox, StblChildren, StblChildrenRef, StblChildrenRefMut, StblCo, StblCoRef, StblCoRefMut};
 pub use stco::StcoBox;
-pub use trak::TrakBox;
+pub use trak::{TrakBox, TrakChildren, TrakChildrenRef, TrakChildrenRefMut};
 pub use value::{Mp4Value, Mp4ValueReaderExt, Mp4ValueWriterExt};
 
 pub use mediasan_common::parse::FourCC;
-pub use mp4san_derive::{ParseBox, ParsedBox};
+pub use mp4san_derive::{ParseBox, ParseBoxes, ParsedBox};
 
 #[cfg(test)]
 mod test {

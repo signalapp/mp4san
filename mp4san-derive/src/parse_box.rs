@@ -21,10 +21,8 @@ pub(crate) fn derive(input: Structure) -> TokenStream {
 
         use mp4san::Report;
         use mp4san::error::ResultExt;
-        use mp4san::parse::{BoxType, Mp4Value, ParseBox, ParseError};
+        use mp4san::parse::{BoxType, Mp4Value, ParseBox, ParseError, FourCC};
         use mp4san::parse::error::ParseResultExt;
-
-        const NAME: BoxType = #box_type;
 
         #[automatically_derived]
         gen impl ParseBox for @Self {

@@ -1,30 +1,45 @@
 #![allow(missing_docs)]
 
+use derive_more::{Deref, DerefMut};
+
+use super::mp4box::Boxes;
+use super::{MdiaBox, ParseBox, ParseBoxes, ParseError, ParsedBox, StblCoRef, StblCoRefMut};
 use crate::error::Result;
 
-use super::error::ParseResultExt;
-use super::mp4box::Boxes;
-use super::{BoxType, MdiaBox, ParseBox, ParseError, ParsedBox, StblCoMut};
-
-#[derive(Clone, Debug, ParseBox, ParsedBox)]
+#[derive(Clone, Debug, Deref, DerefMut, ParseBox, ParsedBox)]
 #[box_type = "trak"]
 pub struct TrakBox {
-    children: Boxes,
+    pub children: Boxes<TrakChildren>,
 }
 
-const NAME: BoxType = BoxType::TRAK;
+#[non_exhaustive]
+#[derive(Clone, Debug, ParseBoxes)]
+#[box_type = "trak"]
+pub struct TrakChildren {
+    pub media: MdiaBox,
+}
 
 impl TrakBox {
     #[cfg(test)]
-    pub(crate) fn with_children<C: Into<Boxes>>(children: C) -> Self {
-        Self { children: children.into() }
+    pub(crate) fn new(media: MdiaBox) -> Result<Self, ParseError> {
+        Self::with_children(TrakChildren { media })
     }
 
-    pub fn co_mut(&mut self) -> Result<StblCoMut<'_>, ParseError> {
-        self.mdia_mut()?.minf_mut()?.stbl_mut()?.co_mut()
+    pub fn with_children(children: TrakChildren) -> Result<Self, ParseError> {
+        Ok(Self { children: Boxes::new(children, [])? })
     }
 
-    pub fn mdia_mut(&mut self) -> Result<&mut MdiaBox, ParseError> {
-        self.children.get_one_mut().while_parsing_child(NAME, BoxType::MDIA)
+    pub fn co(&self) -> StblCoRef<'_> {
+        let media = self.parsed().media;
+        let info = media.parsed().info;
+        let samples = info.parsed().samples;
+        samples.parsed().chunk_offsets
+    }
+
+    pub fn co_mut(&mut self) -> StblCoRefMut<'_> {
+        let media = self.parsed_mut().media;
+        let info = media.parsed_mut().info;
+        let samples = info.parsed_mut().samples;
+        samples.parsed_mut().chunk_offsets
     }
 }

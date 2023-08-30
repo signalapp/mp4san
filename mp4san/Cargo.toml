@@ -25,6 +25,7 @@ futures-util = { version = "0.3.28", default-features = false, features = ["io"]
 log = "0.4.17"
 mediasan-common = { path = "../common", version = "=0.5.0" }
 mp4san-derive = { path = "../mp4san-derive", version = "=0.5.0" }
+nonempty = "0.8.1"
 paste = "1.0.14"
 thiserror = "1.0.38"
 

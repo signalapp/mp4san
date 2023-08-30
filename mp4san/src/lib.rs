@@ -71,7 +71,7 @@ use mediasan_common::AsyncSkipExt;
 
 use crate::error::Report;
 use crate::parse::error::{MultipleBoxes, WhileParsingBox};
-use crate::parse::{BoxHeader, BoxType, FourCC, FtypBox, MoovBox, Mp4Box, Mp4Value, ParseError, StblCoMut};
+use crate::parse::{BoxHeader, BoxType, FourCC, FtypBox, MoovBox, Mp4Box, Mp4Value, ParseError, StblCoRefMut};
 
 //
 // public types
@@ -323,14 +323,12 @@ pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(
             }
 
             BoxType::MOOV => {
-                let mut read_moov = Mp4Box::read_data(reader.as_mut(), header, config.max_metadata_size).await?;
+                let mut read_moov =
+                    Mp4Box::<MoovBox>::read_data(reader.as_mut(), header, config.max_metadata_size).await?;
+                let children = read_moov.data.parse()?.parsed_mut();
 
-                let moov_data: &mut MoovBox = read_moov.data.parse()?;
-                let trak_chunk_counts = moov_data
-                    .traks()
-                    .map(|trak| Ok::<_, Report<_>>(trak?.co_mut()?.entry_count()));
-                let chunk_count = trak_chunk_counts.reduce(|a, b| Ok(a? + b?)).unwrap_or(Ok(0))?;
-                let trak_count = moov_data.traks().count();
+                let chunk_count = children.tracks.iter().map(|trak| trak.co().entry_count()).sum::<u32>();
+                let trak_count = children.tracks.len();
 
                 log::info!("moov @ 0x{start_pos:08x}: {trak_count} traks {chunk_count} chunks");
                 moov = Some(read_moov);
@@ -405,25 +403,23 @@ pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(
 
             log::info!("metadata: 0x{metadata_len:08x} bytes; displacing chunk offsets by 0x{mdat_displacement:08x}");
 
-            for trak in &mut moov.data.parse()?.traks() {
-                let co = trak?.co_mut()?;
-                if let StblCoMut::Stco(stco) = co {
-                    for mut entry in &mut stco.entries_mut() {
-                        let value = entry.get().unwrap_or_else(|_| unreachable!());
-                        entry.set(
-                            checked_add_signed(value, mdat_displacement).ok_or_else(|| {
+            for trak in moov.data.parse()?.parsed_mut().tracks.iter_mut() {
+                match trak.co_mut() {
+                    StblCoRefMut::Stco(stco) => {
+                        for mut entry in &mut stco.entries_mut() {
+                            let value = entry.get().unwrap_or_else(|_| unreachable!());
+                            entry.set(checked_add_signed(value, mdat_displacement).ok_or_else(|| {
                                 report_attach!(ParseError::InvalidInput, "chunk offset not within mdat")
-                            })?,
-                        );
+                            })?);
+                        }
                     }
-                } else if let StblCoMut::Co64(co64) = co {
-                    for mut entry in &mut co64.entries_mut() {
-                        let value = entry.get().unwrap_or_else(|_| unreachable!());
-                        entry.set(
-                            checked_add_signed(value, mdat_displacement.into()).ok_or_else(|| {
+                    StblCoRefMut::Co64(co64) => {
+                        for mut entry in &mut co64.entries_mut() {
+                            let value = entry.get().unwrap_or_else(|_| unreachable!());
+                            entry.set(checked_add_signed(value, mdat_displacement.into()).ok_or_else(|| {
                                 report_attach!(ParseError::InvalidInput, "chunk offset not within mdat")
-                            })?,
-                        );
+                            })?);
+                        }
                     }
                 }
             }

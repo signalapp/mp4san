@@ -1,41 +1,33 @@
 #![allow(missing_docs)]
 
+use derive_more::{Deref, DerefMut};
+use nonempty::NonEmpty;
+
 use crate::error::Result;
 
-use super::error::{ParseResultExt, WhileParsingField};
-use super::{BoxType, Boxes, BoxesValidator, ParseBox, ParseError, ParsedBox, TrakBox};
+use super::{Boxes, ParseBox, ParseBoxes, ParseError, ParsedBox, TrakBox};
 
-#[derive(Clone, Debug, ParseBox, ParsedBox)]
+#[derive(Clone, Debug, Deref, DerefMut, ParseBox, ParsedBox)]
 #[box_type = "moov"]
 pub struct MoovBox {
-    children: Boxes<MoovChildrenValidator>,
+    pub children: Boxes<MoovChildren>,
 }
 
-pub(crate) struct MoovChildrenValidator;
-
-const NAME: BoxType = BoxType::MOOV;
+#[non_exhaustive]
+#[derive(Clone, Debug, ParseBoxes)]
+#[box_type = "moov"]
+pub struct MoovChildren {
+    pub tracks: NonEmpty<TrakBox>,
+}
 
 impl MoovBox {
     #[cfg(test)]
-    pub(crate) fn with_children<C: Into<Boxes<MoovChildrenValidator>>>(children: C) -> Self {
-        Self { children: children.into() }
+    pub fn new(tracks: NonEmpty<TrakBox>) -> Result<Self, ParseError> {
+        Self::with_children(MoovChildren { tracks })
     }
 
-    pub fn traks(&mut self) -> impl Iterator<Item = Result<&mut TrakBox, ParseError>> + '_ {
-        self.children
-            .get_mut()
-            .map(|result| result.while_parsing_child(NAME, BoxType::TRAK))
-    }
-}
-
-impl BoxesValidator for MoovChildrenValidator {
-    fn validate<V>(children: &Boxes<V>) -> Result<(), ParseError> {
-        ensure_attach!(
-            children.box_types().any(|box_type| box_type == BoxType::TRAK),
-            ParseError::MissingRequiredBox(BoxType::TRAK),
-            WhileParsingField(NAME, "children"),
-        );
-        Ok(())
+    pub fn with_children(children: MoovChildren) -> Result<Self, ParseError> {
+        Ok(Self { children: Boxes::new(children, [])? })
     }
 }
 
@@ -43,26 +35,35 @@ impl BoxesValidator for MoovChildrenValidator {
 mod test {
     use bytes::BytesMut;
 
-    use crate::parse::Mp4Box;
+    use crate::parse::{BoxType, MdiaBox, MinfBox, StblBox, StblCo, StcoBox};
 
     use super::*;
-
-    fn test_trak() -> Mp4Box<TrakBox> {
-        Mp4Box::with_data(TrakBox::with_children(vec![]).into()).unwrap()
-    }
 
     #[test]
     fn roundtrip() {
         let mut data = BytesMut::new();
-        MoovBox::with_children(vec![test_trak().into()]).put_buf(&mut data);
+        let test_moov = || {
+            let co = StblCo::Stco(StcoBox::from_iter([]));
+            let track = TrakBox::new(MdiaBox::new(MinfBox::new(StblBox::new(co)?)?)?)?;
+            MoovBox::new(NonEmpty::new(track))
+        };
+        test_moov().unwrap().put_buf(&mut data);
         MoovBox::parse(&mut data).unwrap();
     }
 
     #[test]
     fn no_traks() {
-        let mut data = BytesMut::new();
-        MoovBox::with_children(vec![]).put_buf(&mut data);
-        let err = MoovBox::parse(&mut data).unwrap_err();
+        const NO_TRAKS_MOOV: &[&[u8]] = &[
+            &[0, 0, 0, 16], // box size
+            b"moov",        // box type
+            //
+            // mvhd box (inside moov box)
+            //
+            &[0, 0, 0, 8],
+            b"mvhd",
+        ];
+
+        let err = MoovBox::parse(&mut NO_TRAKS_MOOV.concat()[..].into()).unwrap_err();
         assert!(
             matches!(err.get_ref(), ParseError::MissingRequiredBox(BoxType::TRAK)),
             "{err}",

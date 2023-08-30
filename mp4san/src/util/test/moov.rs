@@ -1,6 +1,10 @@
+use bytes::BytesMut;
 use derive_builder::Builder;
 
-use crate::parse::{fourcc, Co64Box, MdiaBox, MinfBox, MoovBox, Mp4Box, StblBox, StcoBox, TrakBox};
+use crate::parse::{
+    fourcc, AnyMp4Box, BoxData, Boxes, Co64Box, MdiaBox, MinfBox, MoovBox, Mp4Box, Mp4Value, ParseBox, ParsedBox,
+    StblBox, StcoBox, TrakBox,
+};
 
 use super::{test_dinf, test_hdlr, test_mdhd, test_mvhd, test_stsc, test_stsd, test_stsz, test_stts, test_tkhd};
 
@@ -47,23 +51,37 @@ impl TestMoovBuilder {
 
         let mut minf = vec![test_dinf()];
         if spec.stbl {
-            minf.push(Mp4Box::with_data(StblBox::with_children(stbl).into()).unwrap().into());
+            let stbl: Mp4Box<StblBox> = container(stbl);
+            minf.push(stbl.into());
         }
 
         let mut mdia = vec![test_mdhd(), test_hdlr(fourcc::META)];
         if spec.minf {
-            mdia.push(Mp4Box::with_data(MinfBox::with_children(minf).into()).unwrap().into());
+            let minf: Mp4Box<MinfBox> = container(minf);
+            mdia.push(minf.into());
         }
 
         let mut trak = vec![test_tkhd(1)];
         if spec.mdia {
-            trak.push(Mp4Box::with_data(MdiaBox::with_children(mdia).into()).unwrap().into());
+            let mdia: Mp4Box<MdiaBox> = container(mdia);
+            trak.push(mdia.into());
         }
 
         let mut moov = vec![test_mvhd()];
         if spec.trak {
-            moov.push(Mp4Box::with_data(TrakBox::with_children(trak).into()).unwrap().into());
+            let trak: Mp4Box<TrakBox> = container(trak);
+            moov.push(trak.into());
         }
-        Mp4Box::with_data(MoovBox::with_children(moov).into()).unwrap()
+        container(moov)
     }
+}
+
+fn container<T: ParseBox + ParsedBox, I: IntoIterator>(boxes: I) -> Mp4Box<T>
+where
+    AnyMp4Box: From<I::Item>,
+{
+    let mut data = BytesMut::new();
+    let boxes = boxes.into_iter().map(AnyMp4Box::from).collect::<Vec<_>>();
+    Boxes::<()>::try_from(boxes).unwrap().put_buf(&mut data);
+    Mp4Box::with_data(BoxData::Bytes(data.into())).unwrap()
 }
