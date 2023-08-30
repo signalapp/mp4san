@@ -17,6 +17,7 @@ use mediasan_common::error::WhileParsingType;
 use mediasan_common::{AsyncSkipExt, ResultExt};
 
 use crate::error::Result;
+use crate::parse::error::ParseResultExt;
 use crate::util::IoResultExt;
 use crate::{AsyncSkip, BoxDataTooLarge, Error};
 
@@ -127,8 +128,8 @@ impl<T: ParsedBox + ?Sized> Mp4Box<T> {
 
 impl<T: ParsedBox + ?Sized> Mp4Value for Mp4Box<T> {
     fn parse(mut buf: &mut BytesMut) -> Result<Self, ParseError> {
-        let parsed_header = BoxHeader::parse(&mut buf).attach_printable(WhileParsingType::new::<Self>())?;
-        let data = BoxData::get_from_bytes_mut(buf, &parsed_header).attach_printable(WhileParsingType::new::<Self>())?;
+        let parsed_header = BoxHeader::parse(&mut buf).attach_printable(WhileParsingType::new::<T>())?;
+        let data = BoxData::get_from_bytes_mut(buf, &parsed_header).attach_printable(WhileParsingType::new::<T>())?;
         Ok(Self { parsed_header, data })
     }
 
@@ -161,7 +162,7 @@ impl<T: ParsedBox> From<Mp4Box<T>> for AnyMp4Box {
 
 impl<T: ParsedBox + ?Sized> BoxData<T> {
     pub fn get_from_bytes_mut(buf: &mut BytesMut, header: &BoxHeader) -> Result<Self, ParseError> {
-        match header.box_data_size()? {
+        match header.box_data_size().while_parsing_box(header.box_type())? {
             None => Ok(Self::Bytes(take(buf))),
             Some(box_data_size) => match box_data_size.try_into() {
                 Ok(box_data_size) => {
@@ -186,7 +187,7 @@ impl<T: ParsedBox + ?Sized> BoxData<T> {
         T: ParseBox + Sized,
     {
         if let BoxData::Bytes(data) = self {
-            let parsed = T::parse(data).while_parsing_type()?;
+            let parsed = T::parse(data).while_parsing_box(T::box_type())?;
             ensure_attach!(
                 data.is_empty(),
                 ParseError::InvalidInput,
@@ -203,7 +204,7 @@ impl<T: ParsedBox + ?Sized> BoxData<T> {
 
     fn parse_as<U: ParseBox + ParsedBox + Into<Box<T>>>(&mut self) -> Result<Option<&mut U>, ParseError> {
         if let BoxData::Bytes(data) = self {
-            let parsed = U::parse(data).while_parsing_type()?;
+            let parsed = U::parse(data).while_parsing_box(U::box_type())?;
             ensure_attach!(
                 data.is_empty(),
                 ParseError::InvalidInput,

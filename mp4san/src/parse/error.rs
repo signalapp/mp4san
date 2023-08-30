@@ -51,10 +51,12 @@ pub enum ParseError {
 #[doc(hidden)]
 /// Used by the derive macros' generated code.
 pub trait __ParseResultExt: ResultExt + Sized {
+    #[track_caller]
     fn while_parsing_box(self, box_type: BoxType) -> Self {
         self.attach_printable(WhileParsingBox(box_type))
     }
 
+    #[track_caller]
     fn while_parsing_field<T>(self, box_type: BoxType, field_name: T) -> Self
     where
         T: Display + Debug + Send + Sync + 'static,
@@ -62,10 +64,12 @@ pub trait __ParseResultExt: ResultExt + Sized {
         self.attach_printable(WhileParsingField(box_type, field_name))
     }
 
+    #[track_caller]
     fn while_parsing_child(self, box_type: BoxType, child_box_type: BoxType) -> Self {
         self.attach_printable(WhileParsingChild(box_type, child_box_type))
     }
 
+    #[track_caller]
     fn where_eq<T, U>(self, lhs: T, rhs: U) -> Self
     where
         T: Display + Debug + Send + Sync + 'static,
