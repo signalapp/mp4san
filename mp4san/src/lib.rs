@@ -565,13 +565,13 @@ mod test {
         let mut test = test_mp4().mdat_data(vec![]).clone();
         let test_data_len = test.mdat_data_len(u64::MAX - 16).build().data.len() as u64;
         let test = test.mdat_data_len(u64::MAX - test_data_len + 1).build();
-        sanitize(test).unwrap_err();
+        dbg!(sanitize(test).unwrap_err());
     }
 
     #[test]
     fn box_size_overflow() {
         let test = test_mp4().mdat_data_len(u64::MAX - 16).build();
-        sanitize(test).unwrap_err();
+        dbg!(sanitize(test).unwrap_err());
     }
 
     #[test]
@@ -584,7 +584,7 @@ mod test {
         let test = test_mp4()
             .ftyp(test_ftyp().compatible_brands(compatible_brands).clone())
             .build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(dbg!(sanitize(test).unwrap_err()), Error::Parse(err) => {
             assert_matches!(err.into_inner(), ParseError::InvalidInput);
         });
     }
@@ -606,7 +606,7 @@ mod test {
             .build();
         let test = test_spec.build();
         test.sanitize_ok();
-        assert_matches!(sanitize_with_config(test, config).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(dbg!(sanitize_with_config(test, config).unwrap_err()), Error::Parse(err) => {
             assert_matches!(err.into_inner(), ParseError::InvalidInput);
         });
     }
@@ -619,7 +619,7 @@ mod test {
     #[test]
     fn no_ftyp() {
         let test = test_mp4().boxes(&[MOOV, MDAT][..]).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(dbg!(sanitize(test).unwrap_err()), Error::Parse(err) => {
             assert_matches!(err.into_inner(), ParseError::InvalidBoxLayout);
         });
     }
@@ -627,7 +627,7 @@ mod test {
     #[test]
     fn multiple_ftyp() {
         let test = test_mp4().boxes(&[FTYP, FTYP, MOOV, MDAT][..]).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(dbg!(sanitize(test).unwrap_err()), Error::Parse(err) => {
             assert_matches!(err.into_inner(), ParseError::InvalidBoxLayout);
         });
     }
@@ -641,7 +641,7 @@ mod test {
     #[test]
     fn ftyp_not_first_significant_box() {
         let test = test_mp4().boxes(&[MOOV, FTYP, MDAT][..]).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(dbg!(sanitize(test).unwrap_err()), Error::Parse(err) => {
             assert_matches!(err.into_inner(), ParseError::InvalidBoxLayout);
         });
     }
@@ -649,7 +649,7 @@ mod test {
     #[test]
     fn no_moov() {
         let test = test_mp4().boxes(&[FTYP, MDAT][..]).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(dbg!(sanitize(test).unwrap_err()), Error::Parse(err) => {
             assert_matches!(err.into_inner(), ParseError::MissingRequiredBox(MOOV));
         });
     }
@@ -657,7 +657,7 @@ mod test {
     #[test]
     fn no_mdat() {
         let test = test_mp4().boxes(&[FTYP, MOOV][..]).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(dbg!(sanitize(test).unwrap_err()), Error::Parse(err) => {
             assert_matches!(err.into_inner(), ParseError::MissingRequiredBox(MDAT));
         });
     }
@@ -697,7 +697,7 @@ mod test {
     #[test]
     fn uuid() {
         let test = test_mp4().boxes(&[FTYP, MOOV, TEST_UUID, MDAT][..]).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(dbg!(sanitize(test).unwrap_err()), Error::Parse(err) => {
             assert_matches!(err.into_inner(), ParseError::UnsupportedBox(TEST_UUID));
         });
     }
@@ -707,7 +707,7 @@ mod test {
         let test = test_mp4()
             .ftyp(test_ftyp().major_brand(MP41).add_compatible_brand(MP41).clone())
             .build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(dbg!(sanitize(test).unwrap_err()), Error::Parse(err) => {
             assert_matches!(err.into_inner(), ParseError::UnsupportedFormat(MP41));
         });
     }
@@ -727,7 +727,7 @@ mod test {
         let test = test_mp4()
             .ftyp(test_ftyp().major_brand(ISOM).compatible_brands(vec![]).clone())
             .build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(dbg!(sanitize(test).unwrap_err()), Error::Parse(err) => {
             assert_matches!(err.into_inner(), ParseError::UnsupportedFormat(ISOM));
         });
     }
@@ -735,7 +735,7 @@ mod test {
     #[test]
     fn no_trak() {
         let test = test_mp4().moov(test_moov().trak(false).clone()).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(dbg!(sanitize(test).unwrap_err()), Error::Parse(err) => {
             assert_matches!(err.into_inner(), ParseError::MissingRequiredBox(TRAK));
         });
     }
@@ -746,7 +746,7 @@ mod test {
             .boxes(&[FTYP, MDAT, MOOV][..])
             .moov(test_moov().mdia(false).clone())
             .build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(dbg!(sanitize(test).unwrap_err()), Error::Parse(err) => {
             assert_matches!(err.into_inner(), ParseError::MissingRequiredBox(MDIA));
         });
     }
@@ -757,7 +757,7 @@ mod test {
             .boxes(&[FTYP, MDAT, MOOV][..])
             .moov(test_moov().minf(false).clone())
             .build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(dbg!(sanitize(test).unwrap_err()), Error::Parse(err) => {
             assert_matches!(err.into_inner(), ParseError::MissingRequiredBox(MINF));
         });
     }
@@ -768,7 +768,7 @@ mod test {
             .boxes(&[FTYP, MDAT, MOOV][..])
             .moov(test_moov().stbl(false).clone())
             .build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(dbg!(sanitize(test).unwrap_err()), Error::Parse(err) => {
             assert_matches!(err.into_inner(), ParseError::MissingRequiredBox(STBL));
         });
     }
@@ -779,7 +779,7 @@ mod test {
             .boxes(&[FTYP, MDAT, MOOV][..])
             .moov(test_moov().stco(false).clone())
             .build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(dbg!(sanitize(test).unwrap_err()), Error::Parse(err) => {
             assert_matches!(err.into_inner(), ParseError::MissingRequiredBox(STCO | CO64));
         });
     }
@@ -799,7 +799,7 @@ mod test {
             .boxes(&[FTYP, MDAT, MOOV][..])
             .moov(test_moov().co64(true).clone())
             .build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(dbg!(sanitize(test).unwrap_err()), Error::Parse(err) => {
             assert_matches!(err.into_inner(), ParseError::InvalidBoxLayout);
         });
     }
