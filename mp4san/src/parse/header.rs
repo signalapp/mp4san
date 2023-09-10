@@ -291,7 +291,11 @@ impl FullBoxHeader {
 }
 
 impl Mp4Prim for FullBoxHeader {
-    fn parse<B: Buf>(mut buf: B) -> Result<Self, ParseError> {
+    fn parse<B: Buf + AsRef<[u8]>>(mut buf: B) -> Result<Self, ParseError> {
+        ensure_attach!(
+            buf.remaining() >= Self::encoded_len() as usize,
+            ParseError::TruncatedBox
+        );
         let version = u8::parse(&mut buf)?;
         let flags = <[u8; 3]>::parse(buf)?;
         let flags = u32::from_be_bytes([0, flags[0], flags[1], flags[2]]);
@@ -315,8 +319,9 @@ impl<const VERSION: u8, const FLAGS: u32> From<ConstFullBoxHeader<VERSION, FLAGS
 }
 
 impl<const VERSION: u8, const FLAGS: u32> Mp4Prim for ConstFullBoxHeader<VERSION, FLAGS> {
-    fn parse<B: Buf>(buf: B) -> Result<Self, ParseError> {
-        FullBoxHeader::parse(buf)?.ensure_eq(&Self.into())?;
+    fn parse<B: Buf + AsRef<[u8]>>(mut buf: B) -> Result<Self, ParseError> {
+        FullBoxHeader::parse(buf.as_ref())?.ensure_eq(&Self.into())?;
+        buf.advance(Self::encoded_len() as usize);
         Ok(Self)
     }
 
