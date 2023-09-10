@@ -36,6 +36,9 @@ pub use mp4san_derive::{ParseBox, ParseBoxes, ParsedBox};
 
 #[cfg(test)]
 mod test {
+    use std::fmt::Debug;
+
+    use assert_matches::assert_matches;
     use bytes::BytesMut;
 
     use super::*;
@@ -65,6 +68,32 @@ mod test {
         pub array_32: BoundedArray<u32, i32>,
         pub array_16: BoundedArray<u16, i16>,
         pub unbounded_array: UnboundedArray<u8>,
+    }
+
+    #[derive(Clone, Debug, ParseBox, ParsedBox)]
+    #[box_type = "vers"]
+    pub enum VersionedBox {
+        V0 {
+            _parsed_header: ConstFullBoxHeader,
+            foo: u32,
+        },
+        V1(ConstFullBoxHeader<1, 101>, u64),
+        V2(ConstFullBoxHeader<2, 102>),
+    }
+
+    #[derive(Clone, Debug, ParseBox, ParsedBox)]
+    #[box_type = "vers"]
+    pub enum StrictVersionedBox {
+        V0(ConstFullBoxHeader),
+        V1 { parsed_header: ConstFullBoxHeader<1> },
+    }
+
+    fn parse_box<T: ParseBox>(bytes: impl AsRef<[u8]>) -> T {
+        T::parse(&mut BytesMut::from(bytes.as_ref())).unwrap()
+    }
+
+    fn parse_box_err<T: ParseBox + Debug>(bytes: impl AsRef<[u8]>) -> ParseError {
+        T::parse(&mut BytesMut::from(bytes.as_ref())).unwrap_err().into_inner()
     }
 
     #[test]
@@ -103,6 +132,47 @@ mod test {
     #[test]
     fn test_type_compact_str() {
         assert_eq!(Fifth::NAME, BoxType::FourCC(FourCC { value: *b"xa04" }));
+    }
+
+    #[test]
+    fn versioned() {
+        assert_matches!(
+            parse_box([0, 0, 0, 0, 0, 0, 0, 32]),
+            VersionedBox::V0 { _parsed_header: ConstFullBoxHeader, foo: 32 }
+        );
+        assert_matches!(
+            parse_box([1, 0, 0, 101, 0, 0, 0, 0, 0, 0, 0, 64]),
+            VersionedBox::V1(ConstFullBoxHeader, 64)
+        );
+        assert_matches!(parse_box([2, 0, 0, 102]), VersionedBox::V2(ConstFullBoxHeader));
+        assert_matches!(parse_box_err::<VersionedBox>([2, 0, 0, 0]), ParseError::InvalidInput);
+        assert_matches!(
+            parse_box_err::<VersionedBox>([3, 0, 0, 103, 104]),
+            ParseError::InvalidInput
+        );
+    }
+
+    #[test]
+    fn versioned_truncated() {
+        assert_matches!(parse_box_err::<VersionedBox>([]), ParseError::TruncatedBox);
+        assert_matches!(parse_box_err::<VersionedBox>([0, 0, 0, 0]), ParseError::TruncatedBox);
+        assert_matches!(
+            parse_box_err::<VersionedBox>([1, 0, 0, 101, 0, 0, 0, 0, 0, 0, 0]),
+            ParseError::TruncatedBox
+        );
+    }
+
+    #[test]
+    fn versioned_extra() {
+        assert_matches!(parse_box_err::<VersionedBox>([0; 9]), ParseError::InvalidInput);
+        assert_matches!(
+            parse_box_err::<VersionedBox>([1, 0, 0, 101, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+            ParseError::InvalidInput
+        );
+        assert_matches!(
+            parse_box_err::<VersionedBox>([2, 0, 0, 102, 1]),
+            ParseError::InvalidInput
+        );
     }
 
     #[test]

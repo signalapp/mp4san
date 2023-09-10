@@ -12,7 +12,7 @@ use crate::error::Result;
 use super::{FourCC, Mp4ValueWriterExt, ParseError};
 
 pub trait Mp4Prim: Sized {
-    fn parse<B: Buf>(buf: B) -> Result<Self, ParseError>;
+    fn parse<B: Buf + AsRef<[u8]>>(buf: B) -> Result<Self, ParseError>;
     fn encoded_len() -> u64;
     fn put_buf<B: BufMut>(&self, buf: B);
 }
@@ -50,7 +50,7 @@ mp4_int! {
 }
 
 impl<T: Mp4Prim, const N: usize> Mp4Prim for [T; N] {
-    fn parse<B: Buf>(mut buf: B) -> Result<Self, ParseError> {
+    fn parse<B: Buf + AsRef<[u8]>>(mut buf: B) -> Result<Self, ParseError> {
         ensure_attach!(
             buf.remaining() >= Self::encoded_len() as usize,
             ParseError::TruncatedBox,
@@ -71,7 +71,7 @@ impl<T: Mp4Prim, const N: usize> Mp4Prim for [T; N] {
 }
 
 impl Mp4Prim for FourCC {
-    fn parse<B: Buf>(buf: B) -> Result<Self, ParseError> {
+    fn parse<B: Buf + AsRef<[u8]>>(buf: B) -> Result<Self, ParseError> {
         Mp4Prim::parse(buf).map(|value| Self { value }).while_parsing_type()
     }
 
