@@ -15,6 +15,7 @@ mod mp4box;
 mod mvhd;
 mod stbl;
 mod stco;
+mod tkhd;
 mod trak;
 mod value;
 
@@ -22,7 +23,7 @@ pub use array::{ArrayEntry, ArrayEntryMut, BoundedArray, UnboundedArray};
 pub use co64::Co64Box;
 pub use error::ParseError;
 pub use ftyp::FtypBox;
-pub use header::{box_type, fourcc, BoxHeader, BoxSize, BoxType, BoxUuid, ConstFullBoxHeader, FullBoxHeader};
+pub use header::{box_type, fourcc, BoxFlags, BoxHeader, BoxSize, BoxType, BoxUuid, ConstFullBoxHeader, FullBoxHeader};
 pub use integers::{
     ConstI16, ConstI32, ConstI64, ConstI8, ConstU16, ConstU32, ConstU64, ConstU8, Mp4Prim, Mp4Transform,
 };
@@ -34,6 +35,7 @@ pub use mp4box::{AnyMp4Box, BoxData, Boxes, Mp4Box, ParseBox, ParseBoxes, Parsed
 pub use mvhd::MvhdBox;
 pub use stbl::{StblBox, StblChildren, StblChildrenRef, StblChildrenRefMut, StblCo, StblCoRef, StblCoRefMut};
 pub use stco::StcoBox;
+pub use tkhd::TkhdBox;
 pub use trak::{TrakBox, TrakChildren, TrakChildrenRef, TrakChildrenRefMut};
 pub use value::{Mp4Value, Mp4ValueReaderExt, Mp4ValueWriterExt};
 

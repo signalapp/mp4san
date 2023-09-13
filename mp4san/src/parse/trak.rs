@@ -3,7 +3,7 @@
 use derive_more::{Deref, DerefMut};
 
 use super::mp4box::Boxes;
-use super::{MdiaBox, ParseBox, ParseBoxes, ParseError, ParsedBox, StblCoRef, StblCoRefMut};
+use super::{MdiaBox, ParseBox, ParseBoxes, ParseError, ParsedBox, StblCoRef, StblCoRefMut, TkhdBox};
 use crate::error::Result;
 
 #[derive(Clone, Debug, Deref, DerefMut, ParseBox, ParsedBox)]
@@ -16,6 +16,7 @@ pub struct TrakBox {
 #[derive(Clone, Debug, ParseBoxes)]
 #[box_type = "trak"]
 pub struct TrakChildren {
+    pub header: TkhdBox,
     pub media: MdiaBox,
 }
 
@@ -45,11 +46,11 @@ mod test {
 
     impl TrakBox {
         pub(crate) fn dummy() -> Self {
-            Self::new(MdiaBox::dummy()).unwrap()
+            Self::new(TkhdBox::dummy(), MdiaBox::dummy()).unwrap()
         }
 
-        pub(crate) fn new(media: MdiaBox) -> Result<Self, ParseError> {
-            Self::with_children(TrakChildren { media })
+        pub(crate) fn new(header: TkhdBox, media: MdiaBox) -> Result<Self, ParseError> {
+            Self::with_children(TrakChildren { header, media })
         }
     }
 }

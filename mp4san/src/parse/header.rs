@@ -49,11 +49,15 @@ pub struct BoxUuid {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FullBoxHeader {
     pub version: u8,
-    pub flags: u32,
+    pub flags: BoxFlags,
 }
 
 #[allow(missing_docs)]
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, From, PartialEq, Eq)]
+pub struct BoxFlags(pub u32);
+
+#[allow(missing_docs)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ConstFullBoxHeader<const VERSION: u8 = 0, const FLAGS: u32 = 0>;
 
 #[allow(missing_docs)]
@@ -272,7 +276,7 @@ impl fmt::Display for BoxUuid {
 #[allow(missing_docs)]
 impl FullBoxHeader {
     pub const fn default() -> Self {
-        Self { version: 0, flags: 0 }
+        Self { version: 0, flags: BoxFlags(0) }
     }
 
     pub fn ensure_eq(&self, other: &Self) -> Result<(), ParseError> {
@@ -284,7 +288,10 @@ impl FullBoxHeader {
         ensure_attach!(
             self.flags == other.flags,
             ParseError::InvalidInput,
-            format!("box flags 0b{:024b} do not match 0b{:024b}", self.flags, other.flags),
+            format!(
+                "box flags 0b{:024b} do not match 0b{:024b}",
+                self.flags.0, other.flags.0
+            ),
         );
         Ok(())
     }
@@ -297,24 +304,43 @@ impl Mp4Prim for FullBoxHeader {
             ParseError::TruncatedBox
         );
         let version = u8::parse(&mut buf)?;
-        let flags = <[u8; 3]>::parse(buf)?;
-        let flags = u32::from_be_bytes([0, flags[0], flags[1], flags[2]]);
+        let flags = BoxFlags::parse(&mut buf)?;
         Ok(Self { version, flags })
     }
 
     fn encoded_len() -> u64 {
-        4
+        u8::encoded_len() + BoxFlags::encoded_len()
     }
 
     fn put_buf<B: BufMut>(&self, mut out: B) {
         out.put_u8(self.version);
-        out.put_uint(self.flags.into(), 3);
+        self.flags.put_buf(out);
+    }
+}
+
+impl Mp4Prim for BoxFlags {
+    fn parse<B: Buf + AsRef<[u8]>>(buf: B) -> Result<Self, ParseError> {
+        ensure_attach!(
+            buf.remaining() >= Self::encoded_len() as usize,
+            ParseError::TruncatedBox
+        );
+        let value = <[u8; 3]>::parse(buf)?;
+        let value = u32::from_be_bytes([0, value[0], value[1], value[2]]);
+        Ok(Self(value))
+    }
+
+    fn encoded_len() -> u64 {
+        3
+    }
+
+    fn put_buf<B: BufMut>(&self, mut out: B) {
+        out.put_uint(self.0.into(), 3);
     }
 }
 
 impl<const VERSION: u8, const FLAGS: u32> From<ConstFullBoxHeader<VERSION, FLAGS>> for FullBoxHeader {
     fn from(_: ConstFullBoxHeader<VERSION, FLAGS>) -> Self {
-        Self { version: VERSION, flags: FLAGS }
+        Self { version: VERSION, flags: BoxFlags(FLAGS) }
     }
 }
 
@@ -329,8 +355,7 @@ impl<const VERSION: u8, const FLAGS: u32> Mp4Prim for ConstFullBoxHeader<VERSION
         FullBoxHeader::encoded_len()
     }
 
-    fn put_buf<B: BufMut>(&self, mut out: B) {
-        out.put_u8(VERSION);
-        out.put_uint(FLAGS.into(), 3);
+    fn put_buf<B: BufMut>(&self, out: B) {
+        FullBoxHeader::from(*self).put_buf(out)
     }
 }

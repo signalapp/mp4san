@@ -7,7 +7,7 @@ use std::iter;
 use bytes::{BufMut, BytesMut};
 
 use crate::parse::box_type::{DINF, DREF, HDLR, MDAT, MDHD, MECO, META, METT, MVHD, STSC, STSD, STSZ, STTS, TKHD, URL};
-use crate::parse::{fourcc, AnyMp4Box, BoxHeader, BoxType, BoxUuid, FourCC, FullBoxHeader, Mp4Box, Mp4Value};
+use crate::parse::{fourcc, AnyMp4Box, BoxFlags, BoxHeader, BoxType, BoxUuid, FourCC, FullBoxHeader, Mp4Box, Mp4Value};
 use crate::{InputSpan, SanitizedMetadata};
 
 pub const TEST_UUID: BoxType = BoxType::Uuid(BoxUuid { value: *b"thisisatestuuid!" });
@@ -140,7 +140,7 @@ pub fn write_test_dinf_data<B: BufMut>(mut out: B) {
     FullBoxHeader::default().put_buf(&mut out);
     out.put_u32(1); // entry count
     BoxHeader::with_u32_data_size(URL, 4).put_buf(&mut out); // url header
-    FullBoxHeader { version: 0, flags: 1 }.put_buf(&mut out);
+    FullBoxHeader { version: 0, flags: BoxFlags(1) }.put_buf(&mut out);
 }
 
 pub fn write_test_mdat(out: &mut Vec<u8>, data: &[u8]) -> InputSpan {
