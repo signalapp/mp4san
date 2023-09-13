@@ -21,10 +21,14 @@ derive_builder = "0.20.0"
 derive_more = "0.99.17"
 downcast-rs = "1.2.0"
 dyn-clonable = "0.9.0"
+# fixed 1.28.0 requires rustc 1.79.0 or later
+fixed = { version = "<1.28.0", default-features = false }
 futures-util = { version = "0.3.28", default-features = false, features = ["io"] }
+half = { version = "1.8.2", default-features = false }
 log = "0.4.17"
 mediasan-common = { path = "../common", version = "=0.5.2" }
 mp4san-derive = { path = "../mp4san-derive", version = "=0.5.2" }
+nalgebra = { version = "0.32.3", default-features = false }
 nonempty = "0.8.1"
 paste = "1.0.14"
 thiserror = "1.0.38"

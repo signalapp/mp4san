@@ -5,7 +5,7 @@ use nonempty::NonEmpty;
 
 use crate::error::Result;
 
-use super::{Boxes, ParseBox, ParseBoxes, ParseError, ParsedBox, TrakBox};
+use super::{Boxes, MvhdBox, ParseBox, ParseBoxes, ParseError, ParsedBox, TrakBox};
 
 #[derive(Clone, Debug, Deref, DerefMut, ParseBox, ParsedBox)]
 #[box_type = "moov"]
@@ -17,6 +17,7 @@ pub struct MoovBox {
 #[derive(Clone, Debug, ParseBoxes)]
 #[box_type = "moov"]
 pub struct MoovChildren {
+    pub header: MvhdBox,
     pub tracks: NonEmpty<TrakBox>,
 }
 
@@ -28,42 +29,29 @@ impl MoovBox {
 
 #[cfg(test)]
 mod test {
-    use bytes::BytesMut;
-
-    use crate::parse::BoxType;
+    use crate::parse::{BoxType, Mp4Value};
+    use crate::util::test::test_mvhd;
 
     use super::*;
 
     impl MoovBox {
         pub(crate) fn dummy() -> Self {
-            Self::new(NonEmpty::new(TrakBox::dummy())).unwrap()
+            Self::new(MvhdBox::dummy(), NonEmpty::new(TrakBox::dummy())).unwrap()
         }
 
-        pub(crate) fn new(tracks: NonEmpty<TrakBox>) -> Result<Self, ParseError> {
-            Self::with_children(MoovChildren { tracks })
+        pub(crate) fn new(header: MvhdBox, tracks: NonEmpty<TrakBox>) -> Result<Self, ParseError> {
+            Self::with_children(MoovChildren { header, tracks })
         }
     }
 
     #[test]
     fn roundtrip() {
-        let mut data = BytesMut::new();
-        MoovBox::dummy().put_buf(&mut data);
-        MoovBox::parse(&mut data).unwrap();
+        MoovBox::parse(&mut MoovBox::dummy().to_bytes()).unwrap();
     }
 
     #[test]
     fn no_traks() {
-        const NO_TRAKS_MOOV: &[&[u8]] = &[
-            &[0, 0, 0, 16], // box size
-            b"moov",        // box type
-            //
-            // mvhd box (inside moov box)
-            //
-            &[0, 0, 0, 8],
-            b"mvhd",
-        ];
-
-        let err = MoovBox::parse(&mut NO_TRAKS_MOOV.concat()[..].into()).unwrap_err();
+        let err = MoovBox::parse(&mut test_mvhd().to_bytes()).unwrap_err();
         assert!(
             matches!(err.get_ref(), ParseError::MissingRequiredBox(BoxType::TRAK)),
             "{err}",

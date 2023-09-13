@@ -10,6 +10,16 @@ pub trait Mp4Value: Sized {
     fn parse(buf: &mut BytesMut) -> Result<Self, ParseError>;
     fn encoded_len(&self) -> u64;
     fn put_buf<B: BufMut>(&self, buf: B);
+
+    fn to_bytes(&self) -> BytesMut {
+        let mut buf = BytesMut::with_capacity(self.encoded_len() as usize);
+        self.put_buf(&mut buf);
+        buf
+    }
+
+    fn to_vec(&self) -> Vec<u8> {
+        self.to_bytes().to_vec()
+    }
 }
 
 pub trait Mp4ValueReaderExt {

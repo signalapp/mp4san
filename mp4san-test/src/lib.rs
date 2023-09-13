@@ -117,7 +117,7 @@ pub fn example_mdat() -> Vec<u8> {
 
 pub fn example_moov() -> Vec<u8> {
     const EXAMPLE_MOOV: &[&[u8]] = &[
-        &[0, 0, 0, 56], // box size
+        &[0, 0, 0, 64], // box size
         b"moov",        // box type
         //
         // trak box (inside moov box)
@@ -146,6 +146,11 @@ pub fn example_moov() -> Vec<u8> {
         b"stco",        // box type
         &[0, 0, 0, 0],  // box version & flags
         &[0, 0, 0, 0],  // entry count
+        //
+        // mvhd box (inside moov box)
+        //
+        &[0, 0, 0, 8],
+        b"mvhd",
     ];
     EXAMPLE_MOOV.concat()
 }
