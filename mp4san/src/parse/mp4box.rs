@@ -8,7 +8,7 @@ use std::pin::Pin;
 use std::result::Result as StdResult;
 
 use bytes::{Buf, BufMut, BytesMut};
-use derive_more::From;
+use derive_more::{Deref, DerefMut, From};
 use derive_where::derive_where;
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clonable::clonable;
@@ -23,7 +23,7 @@ use crate::util::IoResultExt;
 use crate::{AsyncSkip, BoxDataTooLarge, Error};
 
 use super::error::{MultipleBoxes, WhileParsingBox};
-use super::{BoxHeader, BoxType, Mp4Value, ParseError};
+use super::{BoxHeader, BoxType, Mp4Prim, Mp4Value, Mp4ValueWriterExt, ParseError};
 
 #[derive(Debug)]
 #[derive_where(Clone; BoxData<T>)]
@@ -59,6 +59,15 @@ pub trait ParsedBox: Clone + Debug + Downcast {
 pub struct Boxes<V = ()> {
     boxes: Vec<AnyMp4Box>,
     _typed: PhantomData<V>,
+}
+
+#[derive(Deref, DerefMut)]
+#[derive_where(Clone, Debug, Default; C)]
+pub struct BoundedBoxes<C, V = ()> {
+    #[deref]
+    #[deref_mut]
+    boxes: Boxes<V>,
+    _count: PhantomData<C>,
 }
 
 pub trait ParseBoxes: Sized {
@@ -348,6 +357,14 @@ impl<V> Boxes<V> {
             .ok_or_else(|| ParseError::MissingRequiredBox(T::NAME))?
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.boxes.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.boxes.len()
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &AnyMp4Box> + '_ {
         self.boxes.iter()
     }
@@ -407,6 +424,34 @@ impl<'a, V> IntoIterator for &'a mut Boxes<V> {
 
     fn into_iter(self) -> Self::IntoIter {
         self.boxes.iter_mut()
+    }
+}
+
+//
+// BoundedBoxes impls
+//
+
+impl<C, V: ParseBoxes> From<Boxes<V>> for BoundedBoxes<C, V> {
+    fn from(boxes: Boxes<V>) -> Self {
+        Self { boxes, _count: PhantomData }
+    }
+}
+
+impl<C: Mp4Prim + Into<u32>, V: ParseBoxes> Mp4Value for BoundedBoxes<C, V> {
+    fn parse(buf: &mut BytesMut) -> Result<Self, ParseError> {
+        let count = C::parse(&mut *buf)?;
+        let boxes = Boxes::parse(&mut *buf)?;
+        ensure_attach!(boxes.len() as u32 == count.into(), ParseError::InvalidInput);
+        Ok(Self { boxes, _count: PhantomData })
+    }
+
+    fn encoded_len(&self) -> u64 {
+        <u32 as Mp4Prim>::encoded_len() + self.boxes.encoded_len()
+    }
+
+    fn put_buf<B: BufMut>(&self, mut buf: B) {
+        buf.put_mp4_value(&(self.boxes.len() as u32));
+        self.boxes.put_buf(buf);
     }
 }
 

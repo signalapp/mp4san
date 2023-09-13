@@ -6,7 +6,7 @@ use derive_more::{Deref, DerefMut};
 
 use crate::{error::Result, parse::error::WhileParsingBox};
 
-use super::{AnyMp4Box, Boxes, Co64Box, ParseBox, ParseBoxes, ParseError, ParsedBox, StcoBox};
+use super::{AnyMp4Box, Boxes, Co64Box, ParseBox, ParseBoxes, ParseError, ParsedBox, StcoBox, StsdBox};
 
 #[derive(Clone, Debug, Deref, DerefMut, ParseBox, ParsedBox)]
 #[box_type = "stbl"]
@@ -17,18 +17,21 @@ pub struct StblBox {
 #[non_exhaustive]
 #[derive(Clone, Debug)]
 pub struct StblChildren {
+    pub sample_descriptions: StsdBox,
     pub chunk_offsets: StblCo,
 }
 
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug)]
 pub struct StblChildrenRef<'a> {
+    pub sample_descriptions: &'a StsdBox,
     pub chunk_offsets: StblCoRef<'a>,
 }
 
 #[non_exhaustive]
 #[derive(Debug)]
 pub struct StblChildrenRefMut<'a> {
+    pub sample_descriptions: &'a mut StsdBox,
     pub chunk_offsets: StblCoRefMut<'a>,
 }
 
@@ -54,6 +57,7 @@ pub enum StblCoRefMut<'a> {
 #[derive(Clone, Debug, ParseBoxes)]
 #[box_type = "stbl"]
 struct DerivedStblChildren {
+    sample_descriptions: StsdBox,
     chunk_offsets_32: Option<StcoBox>,
     chunk_offsets_64: Option<Co64Box>,
 }
@@ -77,8 +81,9 @@ impl ParseBoxes for StblChildren {
     where
         Self: 'a,
     {
-        let derived = DerivedStblChildren::parse(boxes)?;
-        let chunk_offsets = match (derived.chunk_offsets_32, derived.chunk_offsets_64) {
+        let DerivedStblChildrenRefMut { sample_descriptions, chunk_offsets_32, chunk_offsets_64 } =
+            DerivedStblChildren::parse(boxes)?;
+        let chunk_offsets = match (chunk_offsets_32, chunk_offsets_64) {
             (Some(chunk_offsets_32), None) => StblCoRefMut::Stco(chunk_offsets_32),
             (None, Some(chunk_offsets_64)) => StblCoRefMut::Co64(chunk_offsets_64),
             (Some(_), Some(_)) => bail_attach!(
@@ -91,26 +96,28 @@ impl ParseBoxes for StblChildren {
                 WhileParsingBox(StblBox::NAME),
             ),
         };
-        Ok(Self::RefMut { chunk_offsets })
+        Ok(Self::RefMut { sample_descriptions, chunk_offsets })
     }
 
     fn parsed<'a>(boxes: &'a [AnyMp4Box]) -> Self::Ref<'a>
     where
         Self: 'a,
     {
-        let DerivedStblChildrenRef { chunk_offsets_32, chunk_offsets_64 } = DerivedStblChildren::parsed(boxes);
+        let DerivedStblChildrenRef { sample_descriptions, chunk_offsets_32, chunk_offsets_64 } =
+            DerivedStblChildren::parsed(boxes);
         let chunk_offsets_32 = chunk_offsets_32.map(StblCoRef::Stco);
         let chunk_offsets_64 = chunk_offsets_64.map(StblCoRef::Co64);
         let chunk_offsets = chunk_offsets_32.or(chunk_offsets_64).unwrap();
-        Self::Ref { chunk_offsets }
+        Self::Ref { sample_descriptions, chunk_offsets }
     }
 
     fn try_into_iter(self) -> Result<Self::IntoIter, ParseError> {
-        let (stco, co64) = match self.chunk_offsets {
-            StblCo::Stco(stco) => (Some(stco), None),
-            StblCo::Co64(co64) => (None, Some(co64)),
+        let Self { sample_descriptions, chunk_offsets } = self;
+        let (chunk_offsets_32, chunk_offsets_64) = match chunk_offsets {
+            StblCo::Stco(chunk_offsets_32) => (Some(chunk_offsets_32), None),
+            StblCo::Co64(chunk_offsets_64) => (None, Some(chunk_offsets_64)),
         };
-        DerivedStblChildren { chunk_offsets_32: stco, chunk_offsets_64: co64 }.try_into_iter()
+        DerivedStblChildren { sample_descriptions, chunk_offsets_32, chunk_offsets_64 }.try_into_iter()
     }
 }
 
@@ -156,12 +163,12 @@ mod test {
 
     impl StblBox {
         pub(crate) fn dummy() -> Self {
-            Self::new(Default::default()).unwrap()
+            Self::new(Default::default(), Default::default()).unwrap()
         }
 
         #[cfg(test)]
-        pub(crate) fn new(chunk_offsets: StblCo) -> Result<Self, ParseError> {
-            Self::with_children(StblChildren { chunk_offsets })
+        pub(crate) fn new(sample_descriptions: StsdBox, chunk_offsets: StblCo) -> Result<Self, ParseError> {
+            Self::with_children(StblChildren { sample_descriptions, chunk_offsets })
         }
     }
 }
