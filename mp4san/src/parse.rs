@@ -82,16 +82,13 @@ mod test {
 
     #[test]
     fn test_type_bytes() {
-        assert_eq!(
-            NotARealBox::box_type(),
-            BoxType::FourCC(FourCC { value: *b"\xffX0\x00" })
-        );
+        assert_eq!(NotARealBox::NAME, BoxType::FourCC(FourCC { value: *b"\xffX0\x00" }));
     }
 
     #[test]
     fn test_type_compact_int_decimal() {
         assert_eq!(
-            AnotherFakeBox::box_type(),
+            AnotherFakeBox::NAME,
             BoxType::FourCC(FourCC { value: 4283969538u32.to_be_bytes() })
         );
     }
@@ -99,12 +96,12 @@ mod test {
     #[test]
     fn test_type_extended() {
         let expected = BoxType::Uuid(BoxUuid { value: 0xc12fdd3f_1e93_464c_baee_7c4480628f58u128.to_be_bytes() });
-        assert_eq!(FakeUuidTypeBox::box_type(), expected);
+        assert_eq!(FakeUuidTypeBox::NAME, expected);
     }
 
     #[test]
     fn test_type_compact_str() {
-        assert_eq!(Fifth::box_type(), BoxType::FourCC(FourCC { value: *b"xa04" }));
+        assert_eq!(Fifth::NAME, BoxType::FourCC(FourCC { value: *b"xa04" }));
     }
 
     #[test]

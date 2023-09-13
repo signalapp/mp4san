@@ -41,9 +41,9 @@ pub enum BoxData<T: ?Sized> {
 }
 
 pub trait ParseBox: Sized {
-    fn parse(buf: &mut BytesMut) -> Result<Self, ParseError>;
+    const NAME: BoxType;
 
-    fn box_type() -> BoxType;
+    fn parse(buf: &mut BytesMut) -> Result<Self, ParseError>;
 }
 
 #[clonable]
@@ -71,7 +71,7 @@ impl<T: ParsedBox + ?Sized> Mp4Box<T> {
     where
         T: ParseBox,
     {
-        let parsed_header = BoxHeader::with_data_size(T::box_type(), data.encoded_len())?;
+        let parsed_header = BoxHeader::with_data_size(T::NAME, data.encoded_len())?;
         Ok(Self { parsed_header, data })
     }
 
@@ -119,7 +119,7 @@ impl<T: ParsedBox + ?Sized> Mp4Box<T> {
     }
 
     pub fn parse_data_as<U: ParseBox + ParsedBox + Into<Box<T>>>(&mut self) -> Result<Option<&mut U>, ParseError> {
-        if self.parsed_header.box_type() != U::box_type() {
+        if self.parsed_header.box_type() != U::NAME {
             return Ok(None);
         }
         self.data.parse_as()
@@ -187,12 +187,12 @@ impl<T: ParsedBox + ?Sized> BoxData<T> {
         T: ParseBox + Sized,
     {
         if let BoxData::Bytes(data) = self {
-            let parsed = T::parse(data).while_parsing_box(T::box_type())?;
+            let parsed = T::parse(data).while_parsing_box(T::NAME)?;
             ensure_attach!(
                 data.is_empty(),
                 ParseError::InvalidInput,
                 "extra unparsed data",
-                WhileParsingBox(T::box_type()),
+                WhileParsingBox(T::NAME),
             );
             *self = Self::Parsed(Box::new(parsed));
         }
@@ -204,12 +204,12 @@ impl<T: ParsedBox + ?Sized> BoxData<T> {
 
     fn parse_as<U: ParseBox + ParsedBox + Into<Box<T>>>(&mut self) -> Result<Option<&mut U>, ParseError> {
         if let BoxData::Bytes(data) = self {
-            let parsed = U::parse(data).while_parsing_box(U::box_type())?;
+            let parsed = U::parse(data).while_parsing_box(U::NAME)?;
             ensure_attach!(
                 data.is_empty(),
                 ParseError::InvalidInput,
                 "extra unparsed data",
-                WhileParsingBox(U::box_type()),
+                WhileParsingBox(U::NAME),
             );
             *self = Self::Parsed(parsed.into());
         }
@@ -282,13 +282,13 @@ impl<V> Boxes<V> {
 
     pub fn get_one_mut<T: ParseBox + ParsedBox>(&mut self) -> Result<&mut T, ParseError> {
         ensure_attach!(
-            self.box_types().filter(|box_type| *box_type == T::box_type()).count() <= 1,
+            self.box_types().filter(|box_type| *box_type == T::NAME).count() <= 1,
             ParseError::InvalidBoxLayout,
-            MultipleBoxes(T::box_type()),
+            MultipleBoxes(T::NAME),
         );
         self.get_mut()
             .next()
-            .ok_or_else(|| ParseError::MissingRequiredBox(T::box_type()))?
+            .ok_or_else(|| ParseError::MissingRequiredBox(T::NAME))?
     }
 }
 
