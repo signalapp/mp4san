@@ -28,7 +28,7 @@ pub(crate) fn derive(input: Structure) -> TokenStream {
 
         #[automatically_derived]
         gen impl ParseBox for @Self {
-            fn box_type() -> BoxType { NAME }
+            const NAME: BoxType = #box_type;
 
             #read_fn
         }
@@ -41,7 +41,7 @@ fn derive_read_fn(ident: &Ident, variant: &VariantInfo<'_>) -> TokenStream {
         quote_spanned! {
             field.span() =>
                 Mp4Value::parse(&mut *buf)
-                .while_parsing_field(<#ident>::box_type(), stringify!(#field_ident))?
+                .while_parsing_field(<#ident>::NAME, stringify!(#field_ident))?
         }
     });
 
@@ -52,7 +52,7 @@ fn derive_read_fn(ident: &Ident, variant: &VariantInfo<'_>) -> TokenStream {
             if !buf.is_empty() {
                 return Err(Report::from(ParseError::InvalidInput))
                     .attach_printable("extra unparsed data")
-                    .while_parsing_box(<#ident>::box_type());
+                    .while_parsing_box(<#ident>::NAME);
             }
 
             Ok(parsed)
