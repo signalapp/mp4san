@@ -5,7 +5,7 @@ use nonempty::NonEmpty;
 
 use crate::error::Result;
 
-use super::{Boxes, ParseBox, ParseBoxes, ParseError, ParsedBox, TrakBox};
+use super::{Boxes, MvhdBox, ParseBox, ParseBoxes, ParseError, ParsedBox, TrakBox};
 
 #[derive(Clone, Debug, Deref, DerefMut, ParseBox, ParsedBox)]
 #[box_type = "moov"]
@@ -17,6 +17,7 @@ pub struct MoovBox {
 #[derive(Clone, Debug, ParseBoxes)]
 #[box_type = "moov"]
 pub struct MoovChildren {
+    pub header: MvhdBox,
     pub tracks: NonEmpty<TrakBox>,
 }
 
@@ -36,11 +37,11 @@ mod test {
 
     impl MoovBox {
         pub(crate) fn dummy() -> Self {
-            Self::new(NonEmpty::new(TrakBox::dummy())).unwrap()
+            Self::new(MvhdBox::dummy(), NonEmpty::new(TrakBox::dummy())).unwrap()
         }
 
-        pub(crate) fn new(tracks: NonEmpty<TrakBox>) -> Result<Self, ParseError> {
-            Self::with_children(MoovChildren { tracks })
+        pub(crate) fn new(header: MvhdBox, tracks: NonEmpty<TrakBox>) -> Result<Self, ParseError> {
+            Self::with_children(MoovChildren { header, tracks })
         }
     }
 
