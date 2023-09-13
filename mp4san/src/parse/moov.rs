@@ -21,11 +21,6 @@ pub struct MoovChildren {
 }
 
 impl MoovBox {
-    #[cfg(test)]
-    pub fn new(tracks: NonEmpty<TrakBox>) -> Result<Self, ParseError> {
-        Self::with_children(MoovChildren { tracks })
-    }
-
     pub fn with_children(children: MoovChildren) -> Result<Self, ParseError> {
         Ok(Self { children: Boxes::new(children, [])? })
     }
@@ -35,19 +30,24 @@ impl MoovBox {
 mod test {
     use bytes::BytesMut;
 
-    use crate::parse::{BoxType, MdiaBox, MinfBox, StblBox, StblCo, StcoBox};
+    use crate::parse::BoxType;
 
     use super::*;
+
+    impl MoovBox {
+        pub(crate) fn dummy() -> Self {
+            Self::new(NonEmpty::new(TrakBox::dummy())).unwrap()
+        }
+
+        pub(crate) fn new(tracks: NonEmpty<TrakBox>) -> Result<Self, ParseError> {
+            Self::with_children(MoovChildren { tracks })
+        }
+    }
 
     #[test]
     fn roundtrip() {
         let mut data = BytesMut::new();
-        let test_moov = || {
-            let co = StblCo::Stco(StcoBox::from_iter([]));
-            let track = TrakBox::new(MdiaBox::new(MinfBox::new(StblBox::new(co)?)?)?)?;
-            MoovBox::new(NonEmpty::new(track))
-        };
-        test_moov().unwrap().put_buf(&mut data);
+        MoovBox::dummy().put_buf(&mut data);
         MoovBox::parse(&mut data).unwrap();
     }
 

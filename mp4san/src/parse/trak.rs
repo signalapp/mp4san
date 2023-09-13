@@ -20,11 +20,6 @@ pub struct TrakChildren {
 }
 
 impl TrakBox {
-    #[cfg(test)]
-    pub(crate) fn new(media: MdiaBox) -> Result<Self, ParseError> {
-        Self::with_children(TrakChildren { media })
-    }
-
     pub fn with_children(children: TrakChildren) -> Result<Self, ParseError> {
         Ok(Self { children: Boxes::new(children, [])? })
     }
@@ -41,5 +36,20 @@ impl TrakBox {
         let info = media.parsed_mut().info;
         let samples = info.parsed_mut().samples;
         samples.parsed_mut().chunk_offsets
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    impl TrakBox {
+        pub(crate) fn dummy() -> Self {
+            Self::new(MdiaBox::dummy()).unwrap()
+        }
+
+        pub(crate) fn new(media: MdiaBox) -> Result<Self, ParseError> {
+            Self::with_children(TrakChildren { media })
+        }
     }
 }

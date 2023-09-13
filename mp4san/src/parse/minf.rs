@@ -21,12 +21,23 @@ pub struct MinfChildren {
 }
 
 impl MinfBox {
-    #[cfg(test)]
-    pub(crate) fn new(samples: StblBox) -> Result<Self, ParseError> {
-        Self::with_children(MinfChildren { samples })
-    }
-
     pub fn with_children(children: MinfChildren) -> Result<Self, ParseError> {
         Ok(Self { children: Boxes::new(children, [])? })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    impl MinfBox {
+        pub(crate) fn dummy() -> Self {
+            Self::new(StblBox::dummy()).unwrap()
+        }
+
+        #[cfg(test)]
+        pub(crate) fn new(samples: StblBox) -> Result<Self, ParseError> {
+            Self::with_children(MinfChildren { samples })
+        }
     }
 }
