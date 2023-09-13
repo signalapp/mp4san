@@ -59,11 +59,6 @@ struct DerivedStblChildren {
 }
 
 impl StblBox {
-    #[cfg(test)]
-    pub(crate) fn new(chunk_offsets: StblCo) -> Result<Self, ParseError> {
-        Self::with_children(StblChildren { chunk_offsets })
-    }
-
     pub fn with_children(children: StblChildren) -> Result<Self, ParseError> {
         Ok(Self { children: Boxes::new(children, [])? })
     }
@@ -120,6 +115,16 @@ impl ParseBoxes for StblChildren {
 }
 
 //
+// StblCo impls
+//
+
+impl Default for StblCo {
+    fn default() -> Self {
+        Self::Stco(Default::default())
+    }
+}
+
+//
 // StblCoRef impls
 //
 
@@ -141,6 +146,22 @@ impl StblCoRefMut<'_> {
         match self {
             Self::Stco(stco) => stco.entry_count(),
             Self::Co64(co64) => co64.entry_count(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    impl StblBox {
+        pub(crate) fn dummy() -> Self {
+            Self::new(Default::default()).unwrap()
+        }
+
+        #[cfg(test)]
+        pub(crate) fn new(chunk_offsets: StblCo) -> Result<Self, ParseError> {
+            Self::with_children(StblChildren { chunk_offsets })
         }
     }
 }
