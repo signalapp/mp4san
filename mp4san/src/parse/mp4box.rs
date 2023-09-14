@@ -446,7 +446,7 @@ impl<C: Mp4Prim + Into<u32> + TryFrom<u32>, V: ParseBoxes> Mp4Value for BoundedB
     }
 
     fn encoded_len(&self) -> u64 {
-        C::encoded_len() + self.boxes.encoded_len()
+        C::ENCODED_LEN + self.boxes.encoded_len()
     }
 
     fn put_buf<B: BufMut>(&self, mut buf: B) {
