@@ -12,15 +12,15 @@ use crate::error::Result;
 
 use super::{Mp4Prim, Mp4Value, Mp4ValueWriterExt, ParseError};
 
-#[derive(Default, PartialEq, Eq)]
-#[derive_where(Clone, Debug; C)]
+#[derive(PartialEq, Eq)]
+#[derive_where(Clone, Debug, Default; C)]
 pub struct BoundedArray<C, T> {
     entry_count: C,
     array: UnboundedArray<T>,
 }
 
-#[derive(Default, PartialEq, Eq)]
-#[derive_where(Clone, Debug)]
+#[derive(PartialEq, Eq)]
+#[derive_where(Clone, Debug, Default)]
 pub struct UnboundedArray<T> {
     entries: BytesMut,
     _t: PhantomData<T>,

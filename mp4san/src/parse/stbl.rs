@@ -4,9 +4,12 @@ use std::vec;
 
 use derive_more::{Deref, DerefMut};
 
-use crate::{error::Result, parse::error::WhileParsingBox};
+use crate::error::Result;
+use crate::parse::error::WhileParsingBox;
 
-use super::{AnyMp4Box, Boxes, Co64Box, ParseBox, ParseBoxes, ParseError, ParsedBox, StcoBox, StsdBox};
+use super::{
+    AnyMp4Box, Boxes, Co64Box, ParseBox, ParseBoxes, ParseError, ParsedBox, StcoBox, StscBox, StsdBox, SttsBox,
+};
 
 #[derive(Clone, Debug, Deref, DerefMut, ParseBox, ParsedBox)]
 #[box_type = "stbl"]
@@ -18,6 +21,8 @@ pub struct StblBox {
 #[derive(Clone, Debug)]
 pub struct StblChildren {
     pub sample_descriptions: StsdBox,
+    pub time_to_sample: SttsBox,
+    pub sample_to_chunk: StscBox,
     pub chunk_offsets: StblCo,
 }
 
@@ -25,6 +30,8 @@ pub struct StblChildren {
 #[derive(Clone, Copy, Debug)]
 pub struct StblChildrenRef<'a> {
     pub sample_descriptions: &'a StsdBox,
+    pub time_to_sample: &'a SttsBox,
+    pub sample_to_chunk: &'a StscBox,
     pub chunk_offsets: StblCoRef<'a>,
 }
 
@@ -32,6 +39,8 @@ pub struct StblChildrenRef<'a> {
 #[derive(Debug)]
 pub struct StblChildrenRefMut<'a> {
     pub sample_descriptions: &'a mut StsdBox,
+    pub time_to_sample: &'a mut SttsBox,
+    pub sample_to_chunk: &'a mut StscBox,
     pub chunk_offsets: StblCoRefMut<'a>,
 }
 
@@ -58,6 +67,8 @@ pub enum StblCoRefMut<'a> {
 #[box_type = "stbl"]
 struct DerivedStblChildren {
     sample_descriptions: StsdBox,
+    time_to_sample: SttsBox,
+    sample_to_chunk: StscBox,
     chunk_offsets_32: Option<StcoBox>,
     chunk_offsets_64: Option<Co64Box>,
 }
@@ -81,8 +92,13 @@ impl ParseBoxes for StblChildren {
     where
         Self: 'a,
     {
-        let DerivedStblChildrenRefMut { sample_descriptions, chunk_offsets_32, chunk_offsets_64 } =
-            DerivedStblChildren::parse(boxes)?;
+        let DerivedStblChildrenRefMut {
+            sample_descriptions,
+            time_to_sample,
+            sample_to_chunk,
+            chunk_offsets_32,
+            chunk_offsets_64,
+        } = DerivedStblChildren::parse(boxes)?;
         let chunk_offsets = match (chunk_offsets_32, chunk_offsets_64) {
             (Some(chunk_offsets_32), None) => StblCoRefMut::Stco(chunk_offsets_32),
             (None, Some(chunk_offsets_64)) => StblCoRefMut::Co64(chunk_offsets_64),
@@ -96,28 +112,34 @@ impl ParseBoxes for StblChildren {
                 WhileParsingBox(StblBox::NAME),
             ),
         };
-        Ok(Self::RefMut { sample_descriptions, chunk_offsets })
+        Ok(Self::RefMut { sample_descriptions, time_to_sample, sample_to_chunk, chunk_offsets })
     }
 
     fn parsed<'a>(boxes: &'a [AnyMp4Box]) -> Self::Ref<'a>
     where
         Self: 'a,
     {
-        let DerivedStblChildrenRef { sample_descriptions, chunk_offsets_32, chunk_offsets_64 } =
-            DerivedStblChildren::parsed(boxes);
+        let DerivedStblChildrenRef {
+            sample_descriptions,
+            time_to_sample,
+            sample_to_chunk,
+            chunk_offsets_32,
+            chunk_offsets_64,
+        } = DerivedStblChildren::parsed(boxes);
         let chunk_offsets_32 = chunk_offsets_32.map(StblCoRef::Stco);
         let chunk_offsets_64 = chunk_offsets_64.map(StblCoRef::Co64);
         let chunk_offsets = chunk_offsets_32.or(chunk_offsets_64).unwrap();
-        Self::Ref { sample_descriptions, chunk_offsets }
+        Self::Ref { sample_descriptions, time_to_sample, sample_to_chunk, chunk_offsets }
     }
 
     fn try_into_iter(self) -> Result<Self::IntoIter, ParseError> {
-        let Self { sample_descriptions, chunk_offsets } = self;
+        let Self { sample_descriptions, time_to_sample, sample_to_chunk, chunk_offsets } = self;
         let (chunk_offsets_32, chunk_offsets_64) = match chunk_offsets {
             StblCo::Stco(chunk_offsets_32) => (Some(chunk_offsets_32), None),
             StblCo::Co64(chunk_offsets_64) => (None, Some(chunk_offsets_64)),
         };
-        DerivedStblChildren { sample_descriptions, chunk_offsets_32, chunk_offsets_64 }.try_into_iter()
+        DerivedStblChildren { sample_descriptions, time_to_sample, sample_to_chunk, chunk_offsets_32, chunk_offsets_64 }
+            .try_into_iter()
     }
 }
 
@@ -163,12 +185,23 @@ mod test {
 
     impl StblBox {
         pub(crate) fn dummy() -> Self {
-            Self::new(Default::default(), Default::default()).unwrap()
+            Self::new(
+                Default::default(),
+                Default::default(),
+                Default::default(),
+                Default::default(),
+            )
+            .unwrap()
         }
 
         #[cfg(test)]
-        pub(crate) fn new(sample_descriptions: StsdBox, chunk_offsets: StblCo) -> Result<Self, ParseError> {
-            Self::with_children(StblChildren { sample_descriptions, chunk_offsets })
+        pub(crate) fn new(
+            sample_descriptions: StsdBox,
+            time_to_sample: SttsBox,
+            sample_to_chunk: StscBox,
+            chunk_offsets: StblCo,
+        ) -> Result<Self, ParseError> {
+            Self::with_children(StblChildren { sample_descriptions, time_to_sample, sample_to_chunk, chunk_offsets })
         }
     }
 }
