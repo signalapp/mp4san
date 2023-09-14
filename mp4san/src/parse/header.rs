@@ -298,18 +298,13 @@ impl FullBoxHeader {
 }
 
 impl Mp4Prim for FullBoxHeader {
+    const ENCODED_LEN: u64 = u8::ENCODED_LEN + BoxFlags::ENCODED_LEN;
+
     fn parse<B: Buf + AsRef<[u8]>>(mut buf: B) -> Result<Self, ParseError> {
-        ensure_attach!(
-            buf.remaining() >= Self::encoded_len() as usize,
-            ParseError::TruncatedBox
-        );
+        ensure_attach!(buf.remaining() >= Self::ENCODED_LEN as usize, ParseError::TruncatedBox);
         let version = u8::parse(&mut buf)?;
         let flags = BoxFlags::parse(&mut buf)?;
         Ok(Self { version, flags })
-    }
-
-    fn encoded_len() -> u64 {
-        u8::encoded_len() + BoxFlags::encoded_len()
     }
 
     fn put_buf<B: BufMut>(&self, mut out: B) {
@@ -319,18 +314,13 @@ impl Mp4Prim for FullBoxHeader {
 }
 
 impl Mp4Prim for BoxFlags {
+    const ENCODED_LEN: u64 = 3;
+
     fn parse<B: Buf + AsRef<[u8]>>(buf: B) -> Result<Self, ParseError> {
-        ensure_attach!(
-            buf.remaining() >= Self::encoded_len() as usize,
-            ParseError::TruncatedBox
-        );
+        ensure_attach!(buf.remaining() >= Self::ENCODED_LEN as usize, ParseError::TruncatedBox);
         let value = <[u8; 3]>::parse(buf)?;
         let value = u32::from_be_bytes([0, value[0], value[1], value[2]]);
         Ok(Self(value))
-    }
-
-    fn encoded_len() -> u64 {
-        3
     }
 
     fn put_buf<B: BufMut>(&self, mut out: B) {
@@ -345,14 +335,12 @@ impl<const VERSION: u8, const FLAGS: u32> From<ConstFullBoxHeader<VERSION, FLAGS
 }
 
 impl<const VERSION: u8, const FLAGS: u32> Mp4Prim for ConstFullBoxHeader<VERSION, FLAGS> {
+    const ENCODED_LEN: u64 = FullBoxHeader::ENCODED_LEN;
+
     fn parse<B: Buf + AsRef<[u8]>>(mut buf: B) -> Result<Self, ParseError> {
         FullBoxHeader::parse(buf.as_ref())?.ensure_eq(&Self.into())?;
-        buf.advance(Self::encoded_len() as usize);
+        buf.advance(Self::ENCODED_LEN as usize);
         Ok(Self)
-    }
-
-    fn encoded_len() -> u64 {
-        FullBoxHeader::encoded_len()
     }
 
     fn put_buf<B: BufMut>(&self, out: B) {

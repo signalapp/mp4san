@@ -49,7 +49,7 @@ pub use trak::{TrakBox, TrakChildren, TrakChildrenRef, TrakChildrenRefMut};
 pub use value::{Mp4Value, Mp4ValueReaderExt, Mp4ValueWriterExt};
 
 pub use mediasan_common::parse::FourCC;
-pub use mp4san_derive::{ParseBox, ParseBoxes, ParsedBox};
+pub use mp4san_derive::{Mp4Prim, Mp4Value, ParseBox, ParseBoxes, ParsedBox};
 
 #[cfg(test)]
 mod test {
@@ -118,7 +118,7 @@ mod test {
         let not_a_real = NotARealBox { bar_ax: u64::MAX, foo_by: u32::MAX };
         assert_eq!(
             not_a_real.encoded_len(),
-            (<u64 as Mp4Prim>::encoded_len() + <u32 as Mp4Prim>::encoded_len()) as u64
+            (<u64 as Mp4Prim>::ENCODED_LEN + <u32 as Mp4Prim>::ENCODED_LEN) as u64
         );
     }
 

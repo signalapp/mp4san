@@ -59,7 +59,7 @@ impl<C: Clone, T: Mp4Prim> BoundedArray<C, T> {
 impl<C: Mp4Prim + Into<u32> + Clone, T: Mp4Prim> Mp4Value for BoundedArray<C, T> {
     fn parse(buf: &mut BytesMut) -> Result<Self, ParseError> {
         let entry_count = C::parse(&mut *buf).while_parsing_type()?;
-        let entries_len = (T::encoded_len() as u32)
+        let entries_len = (T::ENCODED_LEN as u32)
             .checked_mul(entry_count.clone().into())
             .ok_or_else(|| report_attach!(ParseError::InvalidInput, "overflow", WhileParsingType::new::<Self>()))?;
         ensure_attach!(
@@ -73,7 +73,7 @@ impl<C: Mp4Prim + Into<u32> + Clone, T: Mp4Prim> Mp4Value for BoundedArray<C, T>
     }
 
     fn encoded_len(&self) -> u64 {
-        C::encoded_len() + self.array.encoded_len()
+        C::ENCODED_LEN + self.array.encoded_len()
     }
 
     fn put_buf<B: BufMut>(&self, mut buf: B) {
@@ -96,18 +96,18 @@ impl<C: From<u32>, T: Mp4Prim> FromIterator<T> for BoundedArray<C, T> {
 impl<T: Mp4Prim> UnboundedArray<T> {
     pub fn entries(&self) -> impl Iterator<Item = ArrayEntry<'_, T>> + ExactSizeIterator + '_ {
         self.entries
-            .chunks_exact(T::encoded_len() as usize)
+            .chunks_exact(T::ENCODED_LEN as usize)
             .map(|data| ArrayEntry { data, _t: PhantomData })
     }
 
     pub fn entries_mut(&mut self) -> impl Iterator<Item = ArrayEntryMut<'_, T>> + ExactSizeIterator + '_ {
         self.entries
-            .chunks_exact_mut(T::encoded_len() as usize)
+            .chunks_exact_mut(T::ENCODED_LEN as usize)
             .map(|data| ArrayEntryMut { data, _t: PhantomData })
     }
 
     pub fn entry_count(&self) -> usize {
-        self.entries.len() / T::encoded_len() as usize
+        self.entries.len() / T::ENCODED_LEN as usize
     }
 }
 

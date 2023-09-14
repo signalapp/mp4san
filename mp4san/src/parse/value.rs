@@ -27,7 +27,7 @@ impl<T: Mp4Prim> Mp4Value for T {
         Self::parse(buf)
     }
     fn encoded_len(&self) -> u64 {
-        Self::encoded_len()
+        Self::ENCODED_LEN
     }
     fn put_buf<B: BufMut>(&self, buf: B) {
         self.put_buf(buf)

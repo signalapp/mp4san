@@ -22,8 +22,9 @@ use super::{FourCC, Mp4ValueWriterExt, ParseError};
 //
 
 pub trait Mp4Prim: Sized {
+    const ENCODED_LEN: u64;
+
     fn parse<B: Buf + AsRef<[u8]>>(buf: B) -> Result<Self, ParseError>;
-    fn encoded_len() -> u64;
     fn put_buf<B: BufMut>(&self, buf: B);
 }
 
@@ -66,17 +67,15 @@ trait Mp4Fixed {}
 macro_rules! mp4_int {
     ($($ty:ty, $nonzero_ty:ty => ($get_fun:ident, $put_fun:ident)),+ $(,)?) => {
         $(impl Mp4Prim for $ty {
+            const ENCODED_LEN: u64 = size_of::<Self>() as u64;
+
             fn parse<B: Buf>(mut buf: B) -> Result<Self, ParseError> {
                 ensure_attach!(
-                    buf.remaining() >= Self::encoded_len() as usize,
+                    buf.remaining() >= Self::ENCODED_LEN as usize,
                     ParseError::TruncatedBox,
                     WhileParsingType::new::<$ty>(),
                 );
                 Ok(buf.$get_fun())
-            }
-
-            fn encoded_len() -> u64 {
-                size_of::<Self>() as u64
             }
 
             fn put_buf<B: BufMut>(&self, mut buf: B) {
@@ -85,9 +84,11 @@ macro_rules! mp4_int {
         })+
 
         $(impl Mp4Prim for $nonzero_ty {
+            const ENCODED_LEN: u64 = size_of::<Self>() as u64;
+
             fn parse<B: Buf>(mut buf: B) -> Result<Self, ParseError> {
                 ensure_attach!(
-                    buf.remaining() >= Self::encoded_len() as usize,
+                    buf.remaining() >= Self::ENCODED_LEN as usize,
                     ParseError::TruncatedBox,
                     WhileParsingType::new::<$ty>(),
                 );
@@ -98,10 +99,6 @@ macro_rules! mp4_int {
                     );
                 };
                 Ok(value)
-            }
-
-            fn encoded_len() -> u64 {
-                size_of::<Self>() as u64
             }
 
             fn put_buf<B: BufMut>(&self, mut buf: B) {
@@ -126,13 +123,11 @@ impl<T: Fixed + Mp4Fixed> Mp4Prim for T
 where
     T::Bits: Mp4Prim,
 {
+    const ENCODED_LEN: u64 = <T::Bits>::ENCODED_LEN;
+
     fn parse<B: Buf + AsRef<[u8]>>(buf: B) -> Result<Self, ParseError> {
         let bits = <T::Bits>::parse(buf)?;
         Ok(T::from_bits(bits))
-    }
-
-    fn encoded_len() -> u64 {
-        <T::Bits>::encoded_len()
     }
 
     fn put_buf<B: BufMut>(&self, buf: B) {
@@ -144,9 +139,11 @@ impl<T: Mp4Prim, const N: usize> Mp4Prim for [T; N]
 where
     [T; N]: Default,
 {
+    const ENCODED_LEN: u64 = size_of::<Self>() as u64;
+
     fn parse<B: Buf + AsRef<[u8]>>(mut buf: B) -> Result<Self, ParseError> {
         ensure_attach!(
-            buf.remaining() >= Self::encoded_len() as usize,
+            buf.remaining() >= Self::ENCODED_LEN as usize,
             ParseError::TruncatedBox,
             WhileParsingType::new::<Self>(),
         );
@@ -155,10 +152,6 @@ where
             *value = T::parse(&mut buf)?;
         }
         Ok(parsed)
-    }
-
-    fn encoded_len() -> u64 {
-        size_of::<Self>() as u64
     }
 
     fn put_buf<B: BufMut>(&self, mut buf: B) {
@@ -173,9 +166,7 @@ impl Mp4Prim for FourCC {
         Mp4Prim::parse(buf).map(|value| Self { value }).while_parsing_type()
     }
 
-    fn encoded_len() -> u64 {
-        Self::size()
-    }
+    const ENCODED_LEN: u64 = Self::size();
 
     fn put_buf<B: BufMut>(&self, mut buf: B) {
         buf.put_mp4_value(&self.value);
@@ -190,18 +181,16 @@ macro_rules! mp4_const_int {
     ($($ident:ident => $ty:ty),+ $(,)?) => {
         $(
             impl<const N: $ty> Mp4Prim for $ident<N> {
+                const ENCODED_LEN: u64 = <$ty>::ENCODED_LEN;
+
                 fn parse<B: Buf + AsRef<[u8]>>(mut buf: B) -> Result<Self, ParseError> {
                     ensure_attach!(
                         <$ty>::parse(buf.as_ref())? == N,
                         ParseError::InvalidInput,
                         WhereEq(stringify!(N), N)
                     );
-                    buf.advance(Self::encoded_len() as usize);
+                    buf.advance(Self::ENCODED_LEN as usize);
                     Ok(Self)
-                }
-
-                fn encoded_len() -> u64 {
-                    <$ty>::encoded_len()
                 }
 
                 fn put_buf<B: BufMut>(&self, buf: B) {
@@ -255,6 +244,8 @@ impl Default for Mp4Transform {
 }
 
 impl Mp4Prim for Mp4Transform {
+    const ENCODED_LEN: u64 = <[i32; 9]>::ENCODED_LEN;
+
     fn parse<B: Buf + AsRef<[u8]>>(mut buf: B) -> Result<Self, ParseError> {
         let mut raw = Matrix3::default();
         for value in &mut raw {
@@ -264,10 +255,6 @@ impl Mp4Prim for Mp4Transform {
             transform: raw.fixed_columns::<2>(0).map(I16F16::from_bits),
             normalizer: raw.column(2).map(I2F30::from_bits),
         })
-    }
-
-    fn encoded_len() -> u64 {
-        <[i32; 9]>::encoded_len()
     }
 
     fn put_buf<B: BufMut>(&self, mut buf: B) {
