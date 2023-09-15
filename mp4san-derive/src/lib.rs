@@ -104,7 +104,7 @@ fn derive_read_fn(input: &DeriveInput) -> TokenStream2 {
                 fn parse(buf: &mut bytes::BytesMut) -> std::result::Result<Self, mp4san::Report<mp4san::parse::ParseError>> {
                     #(
                         let #bind_ident: #field_ty =
-                            mp4san::parse::error::__ParseResultExt::while_parsing_field(
+                            mp4san::parse::error::ParseResultExt::while_parsing_field(
                                 mp4san::parse::Mp4Value::parse(&mut *buf),
                                 #ident::box_type(),
                                 stringify!(#field_ty),
@@ -112,8 +112,8 @@ fn derive_read_fn(input: &DeriveInput) -> TokenStream2 {
                     )*
                     if !buf.is_empty() {
                         return
-                            mp4san::parse::error::__ParseResultExt::while_parsing_box(
-                                mp4san::error::__ResultExt::attach_printable(
+                            mp4san::parse::error::ParseResultExt::while_parsing_box(
+                                mp4san::error::ResultExt::attach_printable(
                                     Err(mp4san::parse::ParseError::InvalidInput.into()),
                                     "extra unparsed data",
                                 ),

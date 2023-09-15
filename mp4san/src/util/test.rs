@@ -7,7 +7,7 @@ use std::iter;
 use bytes::{BufMut, BytesMut};
 
 use crate::parse::box_type::{DINF, DREF, HDLR, MDAT, MDHD, MECO, META, METT, MVHD, STSC, STSD, STSZ, STTS, TKHD, URL};
-use crate::parse::{AnyMp4Box, BoxHeader, BoxType, BoxUuid, FourCC, FullBoxHeader, Mp4Box, Mp4Value};
+use crate::parse::{fourcc, AnyMp4Box, BoxHeader, BoxType, BoxUuid, FourCC, FullBoxHeader, Mp4Box, Mp4Value};
 use crate::{InputSpan, SanitizedMetadata};
 
 pub const TEST_UUID: BoxType = BoxType::Uuid(BoxUuid { value: *b"thisisatestuuid!" });
@@ -19,14 +19,7 @@ pub use ftyp::TestFtypBuilder;
 pub use moov::TestMoovBuilder;
 pub use mp4::TestMp4Builder;
 
-pub fn init_logger() {
-    // Ignore errors initializing the logger if tests race to configure it
-    let _ignore = env_logger::builder()
-        .filter_level(log::LevelFilter::Info)
-        .parse_default_env()
-        .is_test(true)
-        .try_init();
-}
+pub use mediasan_common_test::init_logger;
 
 pub fn sanitized_data(sanitized: SanitizedMetadata, data: &[u8]) -> Vec<u8> {
     match sanitized.metadata {
@@ -163,7 +156,7 @@ pub fn write_test_meco_data<B: BufMut>(mut out: B) {
 
 pub fn write_test_meta_data<B: BufMut>(mut out: B) {
     FullBoxHeader::default().put_buf(&mut out);
-    test_hdlr(FourCC::META).put_buf(&mut out);
+    test_hdlr(fourcc::META).put_buf(&mut out);
 }
 
 pub fn write_test_mdhd_data<B: BufMut>(mut out: B) {

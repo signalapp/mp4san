@@ -13,12 +13,14 @@ use downcast_rs::{impl_downcast, Downcast};
 use dyn_clonable::clonable;
 use futures_util::io::BufReader;
 use futures_util::{AsyncRead, AsyncReadExt};
+use mediasan_common::error::WhileParsingType;
+use mediasan_common::ResultExt;
 
 use crate::error::Result;
 use crate::util::IoResultExt;
 use crate::{stream_len, stream_position, AsyncSkip, BoxDataTooLarge, Error};
 
-use super::error::{MultipleBoxes, ParseResultExt, WhileParsingBox};
+use super::error::{MultipleBoxes, WhileParsingBox};
 use super::{BoxHeader, BoxType, Mp4Value, ParseError};
 
 #[derive(Debug)]
@@ -125,8 +127,8 @@ impl<T: ParsedBox + ?Sized> Mp4Box<T> {
 
 impl<T: ParsedBox + ?Sized> Mp4Value for Mp4Box<T> {
     fn parse(mut buf: &mut BytesMut) -> Result<Self, ParseError> {
-        let parsed_header = BoxHeader::parse(&mut buf).while_parsing_type::<Self>()?;
-        let data = BoxData::get_from_bytes_mut(buf, &parsed_header).while_parsing_type::<Self>()?;
+        let parsed_header = BoxHeader::parse(&mut buf).attach_printable(WhileParsingType::new::<Self>())?;
+        let data = BoxData::get_from_bytes_mut(buf, &parsed_header).attach_printable(WhileParsingType::new::<Self>())?;
         Ok(Self { parsed_header, data })
     }
 
@@ -184,7 +186,7 @@ impl<T: ParsedBox + ?Sized> BoxData<T> {
         T: ParseBox + Sized,
     {
         if let BoxData::Bytes(data) = self {
-            let parsed = T::parse(data).while_parsing_type::<BoxData<T>>()?;
+            let parsed = T::parse(data).while_parsing_type()?;
             ensure_attach!(
                 data.is_empty(),
                 ParseError::InvalidInput,
@@ -201,7 +203,7 @@ impl<T: ParsedBox + ?Sized> BoxData<T> {
 
     fn parse_as<U: ParseBox + ParsedBox + Into<Box<T>>>(&mut self) -> Result<Option<&mut U>, ParseError> {
         if let BoxData::Bytes(data) = self {
-            let parsed = U::parse(data).while_parsing_type::<BoxData<U>>()?;
+            let parsed = U::parse(data).while_parsing_type()?;
             ensure_attach!(
                 data.is_empty(),
                 ParseError::InvalidInput,
@@ -293,7 +295,7 @@ impl<V: BoxesValidator> Mp4Value for Boxes<V> {
     fn parse(buf: &mut BytesMut) -> Result<Self, ParseError> {
         let mut boxes = Vec::new();
         while buf.has_remaining() {
-            boxes.push(Mp4Box::parse(buf).while_parsing_type::<Self>()?);
+            boxes.push(Mp4Box::parse(buf)?);
         }
         let boxes = Self { boxes, _validator: PhantomData };
         V::validate(&boxes)?;

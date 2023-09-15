@@ -1,13 +1,9 @@
 use std::fmt;
 use std::io;
 
-use bytes::{Buf, BufMut};
+use bytes::Buf;
+use bytes::BufMut;
 use futures_util::{pin_mut, AsyncRead, AsyncReadExt};
-
-use crate::error::Result;
-
-use super::error::ParseResultExt;
-use super::{Mp4Prim, Mp4ValueWriterExt, ParseError};
 
 /// A four-byte character code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -17,35 +13,50 @@ pub struct FourCC {
 }
 
 impl FourCC {
+    /// The encoded length of a [`FourCC`], in bytes.
+    pub const ENCODED_LEN: u32 = 4;
+
+    /// Construct a [`FourCC`] from a string.
+    pub const fn from_str(name: &str) -> Self {
+        let name = name.as_bytes();
+        let mut fourcc = [b' '; 4];
+        let mut name_idx = 0;
+        while name_idx < name.len() {
+            fourcc[name_idx] = name[name_idx];
+            name_idx += 1;
+        }
+        FourCC { value: fourcc }
+    }
+
     /// Return the size of a [`FourCC`].
     pub const fn size() -> u64 {
         4
     }
 
-    pub(crate) async fn read<R: AsyncRead>(input: R) -> io::Result<Self> {
+    /// Read a [`FourCC`] from an [`AsyncRead`].
+    pub async fn read<R: AsyncRead>(input: R) -> io::Result<Self> {
         let mut value = [0; 4];
         pin_mut!(input);
         input.read_exact(&mut value).await?;
         Ok(Self { value })
     }
 
+    /// Parse a [`FourCC`] from a [`Buf`].
+    ///
+    /// The position of `input` is advanced by 4.
+    ///
+    /// # Panics
+    ///
+    /// This function panics if `input.remaining() < 4`.
+    pub fn parse<B: Buf>(mut input: B) -> Self {
+        let mut value = [0; 4];
+        input.copy_to_slice(&mut value);
+        Self { value }
+    }
+
     /// Writes `self` to the [`BufMut`] `out`.
     pub fn put_buf<B: BufMut>(&self, mut out: B) {
         out.put(&self.value[..])
-    }
-}
-
-impl Mp4Prim for FourCC {
-    fn parse<B: Buf>(buf: B) -> Result<Self, ParseError> {
-        Ok(FourCC { value: Mp4Prim::parse(buf).while_parsing_type::<Self>()? })
-    }
-
-    fn encoded_len() -> u64 {
-        Self::size()
-    }
-
-    fn put_buf<B: BufMut>(&self, mut buf: B) {
-        buf.put_mp4_value(&self.value);
     }
 }
 

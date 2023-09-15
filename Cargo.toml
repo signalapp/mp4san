@@ -1,5 +1,5 @@
 [workspace]
-members = ["cli", "mp4san", "mp4san-derive", "mp4san-test", "mp4san-test-gen"]
+members = ["cli", "common", "mp4san", "mp4san-derive", "mp4san-test", "mp4san-test-gen", "webpsan"]
 resolver = "2"
 
 [workspace.package]
@@ -10,8 +10,5 @@ rust-version = "1.61.0"
 
 repository = "https://github.com/privacyresearchgroup/mp4san"
 license = "MIT"
-categories = ["multimedia::video"]
-keywords = ["mp4", "sanitizer", "video", "media"]
 
-readme = "README.md"
-exclude = ["/.github", ".*", "tests/test-data/"]
+exclude = ["/.github", ".*", "/test-data/"]

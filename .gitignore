@@ -9,3 +9,9 @@ Cargo.lock
 /mp4san/fuzz/target/
 /mp4san/fuzz-afl/target/
 /mp4san/fuzz-afl/output/
+/webpsan/fuzz/artifacts/
+/webpsan/fuzz/corpus/
+/webpsan/fuzz/coverage/
+/webpsan/fuzz/target/
+/webpsan/fuzz-afl/target/
+/webpsan/fuzz-afl/output/

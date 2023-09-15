@@ -1,0 +1,21 @@
+[package]
+name = "mediasan-common"
+description = "Common library shared by the mediasan media file sanitizer tools."
+version.workspace = true
+edition.workspace = true
+
+rust-version.workspace = true
+
+repository.workspace = true
+license.workspace = true
+categories = ["multimedia::video"]
+keywords = ["mp4", "sanitizer", "video", "media"]
+
+readme = "../README.md"
+exclude.workspace = true
+
+[dependencies]
+bytes = "1.3.0"
+derive_more = "0.99.17"
+futures-util = { version = "0.3.28", default-features = false, features = ["io"] }
+thiserror = "1.0.38"

@@ -7,10 +7,10 @@ rust-version.workspace = true
 
 repository.workspace = true
 license.workspace = true
-categories.workspace = true
-keywords.workspace = true
+categories = ["multimedia::video"]
+keywords = ["mp4", "sanitizer", "video", "media"]
 
-readme.workspace = true
+readme = "/mp4san/README.md"
 exclude.workspace = true
 
 [lib]

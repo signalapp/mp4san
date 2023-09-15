@@ -4,11 +4,12 @@ use std::mem::size_of;
 
 use bytes::Buf;
 use bytes::BufMut;
+use mediasan_common::error::WhileParsingType;
+use mediasan_common::ResultExt;
 
 use crate::error::Result;
 
-use super::error::WhileParsingType;
-use super::{Mp4ValueWriterExt, ParseError};
+use super::{FourCC, Mp4ValueWriterExt, ParseError};
 
 pub trait Mp4Prim: Sized {
     fn parse<B: Buf>(buf: B) -> Result<Self, ParseError>;
@@ -21,8 +22,7 @@ macro_rules! mp4_int {
         $(impl Mp4Prim for $ty {
             fn parse<B: Buf>(mut buf: B) -> Result<Self, ParseError> {
                 if buf.remaining() < Self::encoded_len() as usize {
-                    use crate::parse::error::WhileParsingType;
-                    bail_attach!(ParseError::TruncatedBox, WhileParsingType(stringify!($ty)));
+                    bail_attach!(ParseError::TruncatedBox, WhileParsingType::new::<$ty>());
                 }
                 Ok(buf.$get_fun())
             }
@@ -67,5 +67,19 @@ impl<T: Mp4Prim, const N: usize> Mp4Prim for [T; N] {
         for value in self {
             buf.put_mp4_value(value);
         }
+    }
+}
+
+impl Mp4Prim for FourCC {
+    fn parse<B: Buf>(buf: B) -> Result<Self, ParseError> {
+        Mp4Prim::parse(buf).map(|value| Self { value }).while_parsing_type()
+    }
+
+    fn encoded_len() -> u64 {
+        Self::size()
+    }
+
+    fn put_buf<B: BufMut>(&self, mut buf: B) {
+        buf.put_mp4_value(&self.value);
     }
 }

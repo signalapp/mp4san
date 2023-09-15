@@ -1,6 +1,5 @@
 //! Error types returned by the unstable parsing API.
 
-use std::any::type_name;
 use std::fmt::{Debug, Display};
 
 use derive_more::Display;
@@ -51,10 +50,6 @@ pub enum ParseError {
 #[doc(hidden)]
 /// Used by the derive macros' generated code.
 pub trait __ParseResultExt: ResultExt + Sized {
-    fn while_parsing_type<T>(self) -> Self {
-        self.attach_printable(WhileParsingType(type_name::<T>()))
-    }
-
     fn while_parsing_box(self, box_type: BoxType) -> Self {
         self.attach_printable(WhileParsingBox(box_type))
     }
@@ -83,16 +78,6 @@ pub(crate) use self::__ParseResultExt as ParseResultExt;
 #[derive(Clone, Copy, Debug, Display)]
 #[display(fmt = "multiple `{}` boxes", _0)]
 pub(crate) struct MultipleBoxes(pub(crate) BoxType);
-
-#[derive(Clone, Copy, Debug, Display)]
-#[display(fmt = "while parsing value of type `{}`", _0)]
-pub(crate) struct WhileParsingType<T>(pub(crate) T);
-
-impl WhileParsingType<&'static str> {
-    pub fn new<T>() -> Self {
-        Self(type_name::<T>())
-    }
-}
 
 #[derive(Clone, Copy, Debug, Display)]
 #[display(fmt = "while parsing `{}` box", _0)]

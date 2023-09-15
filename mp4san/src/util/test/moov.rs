@@ -1,6 +1,6 @@
 use derive_builder::Builder;
 
-use crate::parse::{Co64Box, FourCC, MdiaBox, MinfBox, MoovBox, Mp4Box, StblBox, StcoBox, TrakBox};
+use crate::parse::{fourcc, Co64Box, MdiaBox, MinfBox, MoovBox, Mp4Box, StblBox, StcoBox, TrakBox};
 
 use super::{test_dinf, test_hdlr, test_mdhd, test_mvhd, test_stsc, test_stsd, test_stsz, test_stts, test_tkhd};
 
@@ -50,7 +50,7 @@ impl TestMoovBuilder {
             minf.push(Mp4Box::with_data(StblBox::with_children(stbl).into()).unwrap().into());
         }
 
-        let mut mdia = vec![test_mdhd(), test_hdlr(FourCC::META)];
+        let mut mdia = vec![test_mdhd(), test_hdlr(fourcc::META)];
         if spec.minf {
             mdia.push(Mp4Box::with_data(MinfBox::with_children(minf).into()).unwrap().into());
         }

@@ -32,7 +32,7 @@ jobs:
         run: |
           eval `ssh-agent`
           ssh-add - <<< "${SSH_KEY}"
-          git submodule update --init mp4san/tests/test-data
+          git submodule update --init test-data
 
       - name: cache cargo output
         uses: actions/cache@v3
@@ -93,8 +93,11 @@ jobs:
       - name: cargo install cargo-afl
         run:  cargo install cargo-afl --verbose
 
-      - name: fuzz for 10 seconds
-        run:  cd fuzz-afl && AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 ./fuzz -V 10
+      - name: fuzz mp4san for 10 seconds
+        run:  cd mp4san/fuzz-afl && AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 ./fuzz -V 10
+
+      - name: fuzz webpsan for 10 seconds
+        run:  cd webpsan/fuzz-afl && AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 ./fuzz -V 10
 
   fuzz-libfuzzer:
     name: fuzz-libfuzzer
@@ -121,8 +124,11 @@ jobs:
       - name: cargo install cargo-fuzz
         run:  cargo install cargo-fuzz --verbose
 
-      - name: fuzz for 10 seconds
+      - name: fuzz mp4san for 10 seconds
         run:  cd mp4san && cargo +nightly fuzz run sanitize -- -seed_inputs=$(find fuzz/input/ -type f | tr '\n' ,) -dict=fuzz/mp4.dict -max_total_time=10
+
+      - name: fuzz webpsan for 10 seconds
+        run:  cd webpsan && cargo +nightly fuzz run sanitize -- -seed_inputs=$(find fuzz/input/ -type f | tr '\n' ,) -dict=fuzz/webp.dict -max_total_time=10
 
   build-nightly:
     name: check-nightly

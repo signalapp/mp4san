@@ -1,0 +1,53 @@
+#!/bin/sh
+
+dry_run=0
+fuzz_seconds=
+
+while getopts "hnV:" opt; do
+    case "$opt" in
+        h)
+            cat <<EOF 1>&2
+Usage: $0 [-hn] [number_of_fuzzers]
+
+Parameters:
+    -h  Show help
+    -n  Dry run; echo commands instead of running them
+EOF
+            exit 0
+            ;;
+        n) dry_run=1;;
+        V) fuzz_seconds="$OPTARG"
+    esac
+done
+
+shift $(( $OPTIND - 1 ))
+
+command() {
+    if [ "$dry_run" -eq 1 ]; then
+        echo "$@"
+    else
+        "$@"
+        res=$?
+        if [ $res -ne 0 ]; then
+            echo "Command returned $res: $@"
+            exit $res
+        fi
+    fi
+}
+
+command cargo afl build
+
+FUZZ_ARGS="-i input -o output -x mp4.dict"
+if [ -n "$fuzz_seconds" ]; then
+    FUZZ_ARGS="$FUZZ_ARGS -V $fuzz_seconds"
+fi
+
+FUZZ_BINARY=target/debug/webpsan-fuzz-afl
+
+if [ -n "$1" ]; then
+    for idx in $(seq 1 $idx); do
+        command cargo afl fuzz ${FUZZ_ARGS} -S fuzzer-$idx "$FUZZ_BINARY" &
+    done
+fi
+
+command cargo afl fuzz ${FUZZ_ARGS} -M main "$FUZZ_BINARY"

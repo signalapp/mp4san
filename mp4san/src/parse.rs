@@ -3,7 +3,6 @@
 mod array;
 mod co64;
 pub mod error;
-mod fourcc;
 mod ftyp;
 mod header;
 mod integers;
@@ -19,9 +18,8 @@ mod value;
 pub use array::{ArrayEntry, ArrayEntryMut, BoundedArray, UnboundedArray};
 pub use co64::Co64Box;
 pub use error::ParseError;
-pub use fourcc::FourCC;
 pub use ftyp::FtypBox;
-pub use header::{box_type, BoxHeader, BoxSize, BoxType, BoxUuid, ConstFullBoxHeader, FullBoxHeader};
+pub use header::{box_type, fourcc, BoxHeader, BoxSize, BoxType, BoxUuid, ConstFullBoxHeader, FullBoxHeader};
 pub use integers::Mp4Prim;
 pub use mdia::MdiaBox;
 pub use minf::MinfBox;
@@ -32,6 +30,7 @@ pub use stco::StcoBox;
 pub use trak::TrakBox;
 pub use value::{Mp4Value, Mp4ValueReaderExt, Mp4ValueWriterExt};
 
+pub use mediasan_common::parse::FourCC;
 pub use mp4san_derive::{ParseBox, ParsedBox};
 
 #[cfg(test)]

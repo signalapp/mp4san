@@ -45,39 +45,39 @@
 //!
 //! The [`parse`] module also contains a less stable and undocumented API which can be used to parse individual MP4 box
 //! types.
+//!
+//! [`Seek`]: std::io::Seek
 
 // Used by the derive macros' generated code.
 extern crate self as mp4san;
 
 #[macro_use]
-mod macros;
+extern crate mediasan_common;
 
 pub mod error;
 pub mod parse;
-mod sync;
 mod util;
 
-use std::future::poll_fn;
-use std::io;
-use std::io::{Read, Seek};
+use std::io::Read;
 use std::pin::Pin;
-use std::task::{ready, Context, Poll};
 
 use derive_builder::Builder;
 use derive_more::Display;
 use futures_util::io::BufReader;
-use futures_util::{pin_mut, AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncSeek};
+use futures_util::{pin_mut, AsyncBufReadExt, AsyncRead};
+use mediasan_common::sync;
+use mediasan_common::util::{checked_add_signed, IoResultExt};
+use mediasan_common::{buf_skip as skip, buf_stream_len as stream_len, buf_stream_position as stream_position};
 
 use crate::error::Report;
 use crate::parse::error::{MultipleBoxes, WhileParsingBox};
 use crate::parse::{BoxHeader, BoxType, FourCC, FtypBox, MoovBox, Mp4Box, Mp4Value, ParseError, StblCoMut};
-use crate::util::{checked_add_signed, IoResultExt};
 
 //
 // public types
 //
 
-pub use error::Error;
+pub use crate::error::Error;
 
 #[derive(Builder, Clone)]
 #[builder(build_fn(name = "try_build"))]
@@ -107,47 +107,7 @@ pub struct SanitizedMetadata {
     pub data: InputSpan,
 }
 
-/// A pointer to a span in the given input.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct InputSpan {
-    /// The offset from the beginning of the input where the span begins.
-    pub offset: u64,
-
-    /// The length of the span.
-    pub len: u64,
-}
-
-/// A subset of the [`Seek`] trait, providing a cursor which can skip forward within a stream of bytes.
-///
-/// [`Skip`] is automatically implemented for all types implementing [`Seek`].
-pub trait Skip {
-    /// Skip an amount of bytes in a stream.
-    ///
-    /// A skip beyond the end of a stream is allowed, but behavior is defined by the implementation.
-    fn skip(&mut self, amount: u64) -> io::Result<()>;
-
-    /// Returns the current position of the cursor from the start of the stream.
-    fn stream_position(&mut self) -> io::Result<u64>;
-
-    /// Returns the length of this stream, in bytes.
-    fn stream_len(&mut self) -> io::Result<u64>;
-}
-
-/// A subset of the [`AsyncSeek`] trait, providing a cursor which can skip forward within a stream of bytes.
-///
-/// [`AsyncSkip`] is automatically implemented for all types implementing [`AsyncSeek`].
-pub trait AsyncSkip {
-    /// Skip an amount of bytes in a stream.
-    ///
-    /// A skip beyond the end of a stream is allowed, but behavior is defined by the implementation.
-    fn poll_skip(self: Pin<&mut Self>, cx: &mut Context<'_>, amount: u64) -> Poll<io::Result<()>>;
-
-    /// Returns the current position of the cursor from the start of the stream.
-    fn poll_stream_position(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<u64>>;
-
-    /// Returns the length of this stream, in bytes.
-    fn poll_stream_len(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<u64>>;
-}
+pub use mediasan_common::{AsyncSkip, InputSpan, Skip};
 
 /// The ISO Base Media File Format "compatble brand" recognized by the sanitizer.
 ///
@@ -179,8 +139,10 @@ const MAX_FTYP_SIZE: u64 = 1024;
 /// # Errors
 ///
 /// If the input cannot be parsed, or an IO error occurs, an [`Error`] is returned.
+///
+/// [`Seek`]: std::io::Seek
 pub fn sanitize<R: Read + Skip + Unpin>(input: R) -> Result<SanitizedMetadata, Error> {
-    sanitize_with_config(input, Config::default())
+    sync::sanitize(input, sanitize_async)
 }
 
 /// Sanitize an MP4 input, with the given [`Config`].
@@ -206,8 +168,10 @@ pub fn sanitize<R: Read + Skip + Unpin>(input: R) -> Result<SanitizedMetadata, E
 /// # Errors
 ///
 /// If the input cannot be parsed, or an IO error occurs, an [`Error`] is returned.
+///
+/// [`Seek`]: std::io::Seek
 pub fn sanitize_with_config<R: Read + Skip + Unpin>(input: R, config: Config) -> Result<SanitizedMetadata, Error> {
-    sync::sanitize_with_config(input, config)
+    sync::sanitize(input, |input| sanitize_async_with_config(input, config))
 }
 
 /// Sanitize an MP4 input asynchronously, with the default [`Config`].
@@ -241,6 +205,8 @@ pub fn sanitize_with_config<R: Read + Skip + Unpin>(input: R, config: Config) ->
 /// # Errors
 ///
 /// If the input cannot be parsed, or an IO error occurs, an [`Error`] is returned.
+///
+/// [`AsyncSeek`]: futures_util::io::AsyncSeek
 pub async fn sanitize_async<R: AsyncRead + AsyncSkip>(input: R) -> Result<SanitizedMetadata, Error> {
     sanitize_async_with_config(input, Config::default()).await
 }
@@ -277,6 +243,8 @@ pub async fn sanitize_async<R: AsyncRead + AsyncSkip>(input: R) -> Result<Saniti
 /// # Errors
 ///
 /// If the input cannot be parsed, or an IO error occurs, an [`Error`] is returned.
+///
+/// [`AsyncSeek`]: futures_util::io::AsyncSeek
 pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(
     input: R,
     config: Config,
@@ -505,84 +473,6 @@ impl ConfigBuilder {
 }
 
 //
-// Skip impls
-//
-
-impl<T: Seek> Skip for T {
-    fn skip(&mut self, amount: u64) -> io::Result<()> {
-        match amount.try_into() {
-            Ok(0) => (),
-            Ok(amount) => {
-                self.seek(io::SeekFrom::Current(amount))?;
-            }
-            Err(_) => {
-                let stream_pos = self.stream_position()?;
-                let seek_pos = stream_pos
-                    .checked_add(amount)
-                    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "seek past u64::MAX"))?;
-                self.seek(io::SeekFrom::Start(seek_pos))?;
-            }
-        }
-        Ok(())
-    }
-
-    fn stream_position(&mut self) -> io::Result<u64> {
-        io::Seek::stream_position(self)
-    }
-
-    fn stream_len(&mut self) -> io::Result<u64> {
-        // This is the unstable Seek::stream_len
-        let stream_pos = self.stream_position()?;
-        let len = self.seek(io::SeekFrom::End(0))?;
-
-        if stream_pos != len {
-            self.seek(io::SeekFrom::Start(stream_pos))?;
-        }
-
-        Ok(len)
-    }
-}
-
-//
-// AsyncSkip impls
-//
-
-impl<T: AsyncSeek> AsyncSkip for T {
-    fn poll_skip(mut self: Pin<&mut Self>, cx: &mut Context<'_>, amount: u64) -> Poll<io::Result<()>> {
-        match amount.try_into() {
-            Ok(0) => (),
-            Ok(amount) => {
-                ready!(self.poll_seek(cx, io::SeekFrom::Current(amount)))?;
-            }
-            Err(_) => {
-                let stream_pos = ready!(self.as_mut().poll_stream_position(cx))?;
-                let seek_pos = stream_pos
-                    .checked_add(amount)
-                    .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "seek past u64::MAX"))?;
-                ready!(self.poll_seek(cx, io::SeekFrom::Start(seek_pos)))?;
-            }
-        }
-        Ok(()).into()
-    }
-
-    fn poll_stream_position(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<u64>> {
-        self.poll_seek(cx, io::SeekFrom::Current(0))
-    }
-
-    fn poll_stream_len(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<u64>> {
-        // This is the unstable Seek::stream_len
-        let stream_pos = ready!(self.as_mut().poll_stream_position(cx))?;
-        let len = ready!(self.as_mut().poll_seek(cx, io::SeekFrom::End(0)))?;
-
-        if stream_pos != len {
-            ready!(self.poll_seek(cx, io::SeekFrom::Start(stream_pos)))?;
-        }
-
-        Ok(len).into()
-    }
-}
-
-//
 // private functions
 //
 
@@ -606,32 +496,14 @@ async fn skip_box<R: AsyncRead + AsyncSkip>(
     Ok(box_data_size)
 }
 
-async fn skip<R: AsyncRead + AsyncSkip>(mut reader: Pin<&mut BufReader<R>>, amount: u64) -> io::Result<()> {
-    let buf_len = reader.buffer().len();
-    if let Some(skip_amount) = amount.checked_sub(buf_len as u64) {
-        if skip_amount != 0 {
-            poll_fn(|cx| reader.as_mut().get_pin_mut().poll_skip(cx, skip_amount)).await?;
-        }
-    }
-    reader.consume(buf_len.min(amount as usize));
-    Ok(())
-}
-
-async fn stream_position<R: AsyncRead + AsyncSkip>(mut reader: Pin<&mut BufReader<R>>) -> io::Result<u64> {
-    let stream_pos = poll_fn(|cx| reader.as_mut().get_pin_mut().poll_stream_position(cx)).await?;
-    Ok(stream_pos.saturating_sub(reader.buffer().len() as u64))
-}
-
-async fn stream_len<R: AsyncRead + AsyncSkip>(mut reader: Pin<&mut BufReader<R>>) -> io::Result<u64> {
-    poll_fn(|cx| reader.as_mut().get_pin_mut().poll_stream_len(cx)).await
-}
-
 #[cfg(doctest)]
-#[doc = include_str!("../../README.md")]
+#[doc = include_str!("../README.md")]
 pub mod readme {}
 
 #[cfg(test)]
 mod test {
+    use std::io;
+
     use assert_matches::assert_matches;
 
     use crate::parse::box_type::{CO64, FREE, FTYP, MDAT, MDIA, MECO, META, MINF, MOOV, SKIP, STBL, STCO, TRAK};

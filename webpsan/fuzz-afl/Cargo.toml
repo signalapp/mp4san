@@ -1,0 +1,11 @@
+[workspace]
+members = ["."]
+
+[package]
+name = "webpsan-fuzz-afl"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+afl = "0.12.16"
+webpsan = { path = ".." }

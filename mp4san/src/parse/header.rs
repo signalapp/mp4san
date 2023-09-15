@@ -120,7 +120,7 @@ impl BoxHeader {
         };
 
         let name = match name {
-            FourCC::UUID => {
+            fourcc::UUID => {
                 let mut uuid = [0; 16];
                 input.read_exact(&mut uuid).await?;
                 BoxType::Uuid(BoxUuid { value: uuid })
@@ -175,7 +175,7 @@ impl BoxHeader {
 
         match self.box_type {
             BoxType::FourCC(fourcc) => fourcc.put_buf(&mut out),
-            BoxType::Uuid(_) => FourCC::UUID.put_buf(&mut out),
+            BoxType::Uuid(_) => fourcc::UUID.put_buf(&mut out),
         }
 
         if let BoxSize::Ext(size) = self.box_size {
@@ -201,27 +201,31 @@ impl BoxSize {
 
 macro_rules! box_type {
     ($($name:ident),+ $(,)?) => {
-        impl FourCC {
-            $(
-                #[doc = concat!("The `", stringify!($name), "` box type.")]
-                pub const $name: Self = box_name_to_fourcc(stringify!($name));
-            )+
-        }
+        paste::paste! {
+            #[allow(missing_docs)]
+            pub mod fourcc {
+                use super::*;
+                $(
+                    #[doc = concat!("The `", stringify!([<$name:lower>]), "` box type.")]
+                    pub const $name: FourCC = FourCC::from_str(stringify!([<$name:lower>]));
+                )+
+            }
 
-        impl BoxType {
-            $(
-                #[doc = concat!("The `", stringify!($name), "` box type.")]
-                pub const $name: Self = Self::FourCC(FourCC::$name);
-            )+
-        }
+            impl BoxType {
+                $(
+                    #[doc = concat!("The `", stringify!([<$name:lower>]), "` box type.")]
+                    pub const $name: Self = Self::FourCC(fourcc::$name);
+                )+
+            }
 
-        /// [`BoxType`] constants.
-        pub mod box_type {
-            use super::BoxType;
-            $(
-                #[doc = concat!("The `", stringify!($name), "` box type.")]
-                pub const $name: BoxType = BoxType::$name;
-            )+
+            /// [`BoxType`] constants.
+            pub mod box_type {
+                use super::BoxType;
+                $(
+                    #[doc = concat!("The `", stringify!([<$name:lower>]), "` box type.")]
+                    pub const $name: BoxType = BoxType::$name;
+                )+
+            }
         }
     };
 }
@@ -324,15 +328,4 @@ impl<const VERSION: u8, const FLAGS: u32> Mp4Prim for ConstFullBoxHeader<VERSION
         out.put_u8(VERSION);
         out.put_uint(FLAGS.into(), 3);
     }
-}
-
-const fn box_name_to_fourcc(name: &str) -> FourCC {
-    let name = name.as_bytes();
-    let mut fourcc = [b' '; 4];
-    let mut name_idx = 0;
-    while name_idx < name.len() {
-        fourcc[name_idx] = name[name_idx].to_ascii_lowercase();
-        name_idx += 1;
-    }
-    FourCC { value: fourcc }
 }

@@ -5,10 +5,11 @@ use std::marker::PhantomData;
 
 use bytes::{Buf, BufMut, BytesMut};
 use derive_where::derive_where;
+use mediasan_common::error::WhileParsingType;
+use mediasan_common::ResultExt;
 
 use crate::error::Result;
 
-use super::error::{ParseResultExt, WhileParsingType};
 use super::{Mp4Prim, Mp4Value, Mp4ValueWriterExt, ParseError};
 
 #[derive(Default, PartialEq, Eq)]
@@ -57,7 +58,7 @@ impl<C: Clone, T: Mp4Prim> BoundedArray<C, T> {
 
 impl<C: Mp4Prim + Into<u32> + Clone, T: Mp4Prim> Mp4Value for BoundedArray<C, T> {
     fn parse(buf: &mut BytesMut) -> Result<Self, ParseError> {
-        let entry_count = C::parse(&mut *buf).while_parsing_type::<C>()?;
+        let entry_count = C::parse(&mut *buf).while_parsing_type()?;
         let entries_len = (T::encoded_len() as u32)
             .checked_mul(entry_count.clone().into())
             .ok_or_else(|| report_attach!(ParseError::InvalidInput, "overflow", WhileParsingType::new::<Self>()))?;
