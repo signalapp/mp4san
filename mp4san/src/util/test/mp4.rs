@@ -195,7 +195,12 @@ impl TestMp4 {
     }
 
     fn expected_metadata(&self, actual_len: usize) -> Bytes {
-        let Some(pad_len) = self.expected_metadata.len().checked_sub(actual_len).and_then(NonZeroUsize::new) else {
+        let Some(pad_len) = self
+            .expected_metadata
+            .len()
+            .checked_sub(actual_len)
+            .and_then(NonZeroUsize::new)
+        else {
             return self.expected_metadata.clone();
         };
         let mut expected_metadata = self.expected_metadata.to_vec();

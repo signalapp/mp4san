@@ -52,7 +52,9 @@ pub fn verify_gpac(data: &[u8], expected_media_data: Option<&[u8]>) -> Result<()
             .min_by_key(|(_track_idx, sample)| sample.as_ref().map(|sample| sample.data_offset()).map_err(drop))
             .map(|(track_idx, _sample)| track_idx)
             .unwrap_or_default();
-        let Some(sample) = tracks[next_track_idx].next() else { break };
+        let Some(sample) = tracks[next_track_idx].next() else {
+            break;
+        };
         let sample = sample?;
 
         if let Some(unverified_media_data) = &mut unverified_media_data {

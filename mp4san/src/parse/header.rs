@@ -77,7 +77,11 @@ impl BoxHeader {
 
         let header_len = Self { box_type, box_size: BoxSize::Ext(0) }.encoded_len();
         let Some(box_size) = data_size.checked_add(header_len) else {
-            bail_attach!(ParseError::InvalidInput, "box size too large", WhileParsingBox(box_type));
+            bail_attach!(
+                ParseError::InvalidInput,
+                "box size too large",
+                WhileParsingBox(box_type)
+            );
         };
         Ok(Self { box_type, box_size: BoxSize::Ext(box_size) })
     }
