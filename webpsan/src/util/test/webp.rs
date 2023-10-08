@@ -6,11 +6,14 @@ use mediasan_common::parse::FourCC;
 use mediasan_common::Skip;
 use mediasan_common_test::init_logger;
 
-use crate::parse::chunk_type::{ALPH, ANIM, EXIF, ICCP, RIFF, VP8, VP8L, VP8X, XMP};
-use crate::parse::{Vp8xFlags, WebpChunk};
+use crate::parse::chunk_type::{ALPH, ANIM, ANMF, EXIF, ICCP, RIFF, VP8, VP8L, VP8X, XMP};
+use crate::parse::{AlphFlags, Vp8xFlags, WebpChunk};
 use crate::{sanitize_with_config, Config};
 
-use super::{write_test_chunk, write_test_exif, write_test_iccp, write_test_vp8x, write_test_xmp};
+use super::{
+    write_test_alph, write_test_anim, write_test_anmf, write_test_chunk, write_test_exif, write_test_iccp,
+    write_test_vp8x, write_test_xmp,
+};
 
 #[derive(Builder)]
 #[builder(name = "TestWebpBuilder", build_fn(name = "build_spec"))]
@@ -21,11 +24,17 @@ pub struct TestWebpSpec {
     #[builder(default)]
     vp8x: TestVp8xSpecBuilder,
 
+    #[builder(default)]
+    alph: TestAlphSpecBuilder,
+
+    #[builder(default, setter(into, each(name = "add_anmf")))]
+    anmfs: Vec<TestAnmfSpecBuilder>,
+
     #[builder(default = "DEFAULT_IMAGE_DATA.to_vec()")]
     #[builder(setter(into, each(name = "add_image_data", into)))]
     image_data: Vec<u8>,
 
-    #[builder(default = "vec![VP8]")]
+    #[builder(default = "vec![VP8L]")]
     #[builder(setter(into, each(name = "add_chunk")))]
     chunks: Vec<FourCC>,
 }
@@ -46,6 +55,42 @@ pub struct TestVp8xSpec {
 
     #[builder(default)]
     pub height: u32,
+}
+
+#[derive(Builder)]
+pub struct TestAlphSpec {
+    #[builder(default = "AlphFlags::COMPRESS_LOSSLESS")]
+    pub flags: AlphFlags,
+
+    #[builder(default = "DEFAULT_ALPH_DATA.to_vec()")]
+    #[builder(setter(into, each(name = "add_image_data", into)))]
+    image_data: Vec<u8>,
+}
+
+#[derive(Builder)]
+pub struct TestAnmfSpec {
+    #[builder(default)]
+    x: u32,
+
+    #[builder(default)]
+    y: u32,
+
+    #[builder(default)]
+    width: u32,
+
+    #[builder(default)]
+    height: u32,
+
+    #[builder(default)]
+    alph: TestAlphSpecBuilder,
+
+    #[builder(default = "DEFAULT_IMAGE_DATA.to_vec()")]
+    #[builder(setter(into, each(name = "add_image_data", into)))]
+    image_data: Vec<u8>,
+
+    #[builder(default = "vec![VP8L]")]
+    #[builder(setter(into, each(name = "add_chunk")))]
+    chunks: Vec<FourCC>,
 }
 
 #[derive(Builder)]
@@ -73,6 +118,13 @@ const DEFAULT_IMAGE_DATA: &[u8] = &[
     0b0000_1000,
 ];
 
+const DEFAULT_ALPH_DATA: &[u8] = &[
+    // image-stream: optional-transform color-cache-info meta-prefix 5prefix-code
+    0b1000_1000,
+    0b1000_1000,
+    0b0000_1000,
+];
+
 impl TestWebpBuilder {
     pub fn build(&self) -> TestWebp {
         self.build_spec().unwrap().build()
@@ -94,6 +146,8 @@ impl TestWebpSpec {
             data.extend_from_slice(&file_header.name.value);
         }
 
+        let mut anmfs = self.anmfs.clone();
+
         for chunk_type in &self.chunks {
             match *chunk_type {
                 VP8 | VP8L => {
@@ -109,7 +163,10 @@ impl TestWebpSpec {
                         if self.chunks.contains(&ANIM) {
                             flags.insert(Vp8xFlags::IS_ANIMATED);
                         }
-                        if self.chunks.contains(&ALPH) {
+                        let mut anmfs = self.anmfs.iter().map(|anmf| anmf.build().unwrap());
+                        let any_anmf_alph =
+                            self.chunks.contains(&ANMF) && anmfs.any(|anmf| anmf.chunks.contains(&ALPH));
+                        if self.chunks.contains(&ALPH) || any_anmf_alph {
                             flags.insert(Vp8xFlags::HAS_ALPH_CHUNK);
                         }
                         if self.chunks.contains(&EXIF) {
@@ -121,6 +178,28 @@ impl TestWebpSpec {
                         flags
                     });
                     write_test_vp8x(&mut data, flags.bits(), spec.width, spec.height);
+                }
+                ALPH => {
+                    let alph = self.alph.build().unwrap();
+                    write_test_alph(&mut data, alph.flags.bits(), &alph.image_data)
+                }
+                ANIM => write_test_anim(&mut data),
+                ANMF => {
+                    let anmf = (!anmfs.is_empty()).then(|| anmfs.remove(0)).unwrap_or_default();
+                    let TestAnmfSpec { x, y, width, height, alph, image_data, chunks } = anmf.build().unwrap();
+                    let alph = alph.build().unwrap();
+
+                    let mut anmf_data = vec![];
+                    for chunk_type in chunks {
+                        match chunk_type {
+                            ALPH => write_test_alph(&mut anmf_data, alph.flags.bits(), &alph.image_data),
+                            VP8 | VP8L => {
+                                write_test_chunk(&mut anmf_data, &chunk_type.value, &image_data);
+                            }
+                            _ => panic!("invalid chunk type in ANMF for test {chunk_type}"),
+                        }
+                    }
+                    write_test_anmf(&mut data, x, y, width, height, &anmf_data);
                 }
                 ICCP => write_test_iccp(&mut data),
                 EXIF => write_test_exif(&mut data),

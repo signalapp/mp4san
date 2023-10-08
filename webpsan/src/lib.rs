@@ -411,7 +411,8 @@ mod test {
     use assert_matches::assert_matches;
     use mediasan_common::parse::FourCC;
 
-    use crate::util::test::{test_header, test_webp};
+    use crate::parse::AlphFlags;
+    use crate::util::test::{test_alph, test_anmf, test_header, test_vp8x, test_webp};
 
     const TEST: FourCC = FourCC { value: *b"TeSt" };
 
@@ -495,15 +496,190 @@ mod test {
     }
 
     #[test]
+    pub fn vp8x_lossy_alpha_lossless() {
+        let alph = test_alph().flags(AlphFlags::COMPRESS_LOSSLESS).clone();
+        test_webp().chunks([VP8X, ALPH, VP8]).alph(alph).build().sanitize_ok();
+    }
+
+    #[test]
+    pub fn vp8x_lossy_alpha_uncompressed() {
+        let alph = test_alph().flags(AlphFlags::empty()).clone();
+        test_webp().chunks([VP8X, ALPH, VP8]).alph(alph).build().sanitize_ok();
+    }
+
+    #[test]
     pub fn vp8x_lossless() {
         test_webp().chunks([VP8X, VP8L]).build().sanitize_ok();
     }
 
     #[test]
-    pub fn vp8x_no_image_data() {
+    pub fn vp8x_lossless_alpha_lossless() {
+        let alph = test_alph().flags(AlphFlags::COMPRESS_LOSSLESS).clone();
+        test_webp().chunks([VP8X, ALPH, VP8L]).alph(alph).build().sanitize_ok();
+    }
+
+    #[test]
+    pub fn vp8x_lossless_alpha_uncompressed() {
+        let alph = test_alph().flags(AlphFlags::empty()).clone();
+        test_webp().chunks([VP8X, ALPH, VP8L]).alph(alph).build().sanitize_ok();
+    }
+
+    #[test]
+    pub fn vp8x_animated() {
+        test_webp().chunks([VP8X, ANIM, ANMF, ANMF]).build().sanitize_ok();
+    }
+
+    #[test]
+    pub fn vp8x_animated_empty() {
+        let test = test_webp().chunks([VP8X, ANIM]).anmfs([]).build();
+        test.sanitize_ok();
+    }
+
+    #[test]
+    pub fn vp8x_animated_lossless() {
+        let anmf = test_anmf().chunks([VP8L]).clone();
+        let anmfs = [anmf.clone(), anmf];
+        let test = test_webp().chunks([VP8X, ANIM, ANMF, ANMF]).anmfs(anmfs).build();
+        test.sanitize_ok();
+    }
+
+    #[test]
+    pub fn vp8x_animated_lossy() {
+        let anmf = test_anmf().chunks([VP8]).clone();
+        let anmfs = [anmf.clone(), anmf];
+        let test = test_webp().chunks([VP8X, ANIM, ANMF, ANMF]).anmfs(anmfs).build();
+        test.sanitize_ok();
+    }
+
+    #[test]
+    pub fn vp8x_animated_lossy_lossless() {
+        let anmfs = [test_anmf().chunks([VP8]).clone(), test_anmf().chunks([VP8L]).clone()];
+        let test = test_webp().chunks([VP8X, ANIM, ANMF, ANMF]).anmfs(anmfs).build();
+        test.sanitize_ok();
+    }
+
+    #[test]
+    pub fn vp8x_animated_lossless_alpha() {
+        let anmf = test_anmf().chunks([ALPH, VP8L]).clone();
+        let anmfs = [anmf.clone(), anmf];
+        let test = test_webp().chunks([VP8X, ANIM, ANMF, ANMF]).anmfs(anmfs).build();
+        test.sanitize_ok();
+    }
+
+    #[test]
+    pub fn vp8x_animated_lossy_alpha() {
+        let anmf = test_anmf().chunks([ALPH, VP8]).clone();
+        let anmfs = [anmf.clone(), anmf];
+        let test = test_webp().chunks([VP8X, ANIM, ANMF, ANMF]).anmfs(anmfs).build();
+        test.sanitize_ok();
+    }
+
+    #[test]
+    pub fn vp8x_animated_alpha_no_alpha() {
+        let anmf_no_alpha = test_anmf().chunks([VP8L]).clone();
+        let alpha_anmf = test_anmf().chunks([ALPH, VP8L]).clone();
+        let anmfs = [alpha_anmf, anmf_no_alpha];
+        let test = test_webp().chunks([VP8X, ANIM, ANMF, ANMF]).anmfs(anmfs).build();
+        test.sanitize_ok();
+    }
+
+    #[test]
+    pub fn vp8x_animated_no_alpha_alpha() {
+        let anmf_no_alpha = test_anmf().chunks([VP8L]).clone();
+        let alpha_anmf = test_anmf().chunks([ALPH, VP8L]).clone();
+        let anmfs = [anmf_no_alpha, alpha_anmf];
+        let test = test_webp().chunks([VP8X, ANIM, ANMF, ANMF]).anmfs(anmfs).build();
+        test.sanitize_ok();
+    }
+
+    #[test]
+    pub fn vp8x_animated_alph_missing() {
+        let vp8x = test_vp8x()
+            .flags(Some(Vp8xFlags::IS_ANIMATED | Vp8xFlags::HAS_ALPH_CHUNK))
+            .clone();
+        let anmfs = [test_anmf().chunks([VP8L]).clone()];
+        let test = test_webp().chunks([VP8X, ANIM, ANMF]).vp8x(vp8x).anmfs(anmfs).build();
+        test.sanitize_ok();
+    }
+
+    #[test]
+    pub fn vp8x_animated_alph_wrong_order() {
+        let anmfs = [test_anmf().chunks([VP8L, ALPH]).clone()];
+        let test = test_webp().chunks([VP8X, ANIM, ANMF]).anmfs(anmfs).build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
+        });
+    }
+
+    #[test]
+    pub fn vp8x_animated_unexpected_alph() {
+        let vp8x = test_vp8x().flags(Some(Vp8xFlags::IS_ANIMATED)).clone();
+        let anmfs = [test_anmf().chunks([ALPH, VP8L]).clone()];
+        let test = test_webp().chunks([VP8X, ANIM, ANMF]).vp8x(vp8x).anmfs(anmfs).build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
+        });
+    }
+
+    #[test]
+    pub fn vp8x_image_data_missing() {
         let test = test_webp().chunks([VP8X]).build();
         assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::MissingRequiredChunk(VP8), "{err:?}");
+        });
+    }
+
+    #[test]
+    pub fn vp8x_unexpected_alph() {
+        let vp8x = test_vp8x().flags(Some(Vp8xFlags::empty())).clone();
+        let test = test_webp().chunks([VP8X, ALPH, VP8L]).vp8x(vp8x).build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
+        });
+    }
+
+    #[test]
+    pub fn vp8x_unexpected_anim() {
+        let vp8x = test_vp8x().flags(Some(Vp8xFlags::empty())).clone();
+        let test = test_webp().chunks([VP8X, ANIM, ANMF]).vp8x(vp8x).build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
+        });
+    }
+
+    #[test]
+    pub fn vp8x_unexpected_anmf() {
+        let vp8x = test_vp8x().flags(Some(Vp8xFlags::empty())).clone();
+        let test = test_webp().chunks([VP8X, ANMF]).vp8x(vp8x).build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
+        });
+    }
+
+    #[test]
+    pub fn vp8x_alph_missing() {
+        let vp8x = test_vp8x().flags(Some(Vp8xFlags::HAS_ALPH_CHUNK)).clone();
+        let test = test_webp().chunks([VP8X, VP8L]).vp8x(vp8x).build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
+        });
+    }
+
+    #[test]
+    pub fn vp8x_anim_missing() {
+        let vp8x = test_vp8x().flags(Some(Vp8xFlags::IS_ANIMATED)).clone();
+        let test = test_webp().chunks([VP8X, ANMF]).vp8x(vp8x).build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
+        });
+    }
+
+    #[test]
+    pub fn vp8x_anim_anmf_missing() {
+        let vp8x = test_vp8x().flags(Some(Vp8xFlags::IS_ANIMATED)).clone();
+        let test = test_webp().chunks([VP8X]).vp8x(vp8x).build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.get_ref(), ParseError::MissingRequiredChunk(ANIM), "{err:?}");
         });
     }
 
@@ -537,6 +713,14 @@ mod test {
     }
 
     #[test]
+    pub fn vp8x_alph_wrong_order() {
+        let test = test_webp().chunks([VP8X, VP8L, ALPH]).build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
+        });
+    }
+
+    #[test]
     pub fn vp8x_iccp_wrong_order() {
         let test = test_webp().chunks([VP8X, VP8L, ICCP]).build();
         assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
@@ -559,6 +743,60 @@ mod test {
     #[test]
     pub fn vp8x_xmp_wrong_order() {
         let test = test_webp().chunks([VP8X, XMP, VP8L]).build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
+        });
+    }
+
+    #[test]
+    pub fn vp8x_iccp_missing() {
+        let vp8x = test_vp8x().flags(Some(Vp8xFlags::HAS_ICCP_CHUNK)).clone();
+        let test = test_webp().chunks([VP8X, VP8L]).vp8x(vp8x).build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
+        });
+    }
+
+    #[test]
+    pub fn vp8x_exif_missing() {
+        let vp8x = test_vp8x().flags(Some(Vp8xFlags::HAS_EXIF_CHUNK)).clone();
+        let test = test_webp().chunks([VP8X, VP8L]).vp8x(vp8x).build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.get_ref(), ParseError::MissingRequiredChunk(EXIF), "{err:?}");
+        });
+    }
+
+    #[test]
+    pub fn vp8x_xmp_missing() {
+        let vp8x = test_vp8x().flags(Some(Vp8xFlags::HAS_XMP_CHUNK)).clone();
+        let test = test_webp().chunks([VP8X, VP8L]).vp8x(vp8x).build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.get_ref(), ParseError::MissingRequiredChunk(XMP), "{err:?}");
+        });
+    }
+
+    #[test]
+    pub fn vp8x_iccp_unexpected() {
+        let vp8x = test_vp8x().flags(Some(Vp8xFlags::empty())).clone();
+        let test = test_webp().chunks([VP8X, ICCP, VP8L]).vp8x(vp8x).build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
+        });
+    }
+
+    #[test]
+    pub fn vp8x_exif_unexpected() {
+        let vp8x = test_vp8x().flags(Some(Vp8xFlags::empty())).clone();
+        let test = test_webp().chunks([VP8X, VP8L, EXIF]).vp8x(vp8x).build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
+        });
+    }
+
+    #[test]
+    pub fn vp8x_xmp_unexpected() {
+        let vp8x = test_vp8x().flags(Some(Vp8xFlags::empty())).clone();
+        let test = test_webp().chunks([VP8X, VP8L, XMP]).vp8x(vp8x).build();
         assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
         });
