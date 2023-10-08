@@ -1,5 +1,5 @@
 [workspace]
-members = ["cli", "derive", "mp4san", "test", "test-gen"]
+members = ["cli", "mp4san", "mp4san-derive", "mp4san-test", "mp4san-test-gen"]
 resolver = "2"
 
 [workspace.package]

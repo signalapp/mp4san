@@ -8,4 +8,4 @@ edition = "2021"
 
 [dependencies]
 afl = "0.12.16"
-mp4san = { path = "../mp4san" }
+mp4san = { path = ".." }

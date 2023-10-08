@@ -23,11 +23,11 @@ downcast-rs = "1.2.0"
 dyn-clonable = "0.9.0"
 futures-util = { version = "0.3", default-features = false, features = ["async-await", "std", "io"] }
 log = "0.4.17"
-mp4san_derive = { path = "../derive", version = "=0.3.1" }
+mp4san_derive = { path = "../mp4san-derive", version = "=0.3.1" }
 thiserror = "1.0.38"
 
 [dev-dependencies]
 assert_matches = "1.5.0"
 env_logger = "0.10.0"
 libflate = "1.2.0"
-mp4san-test = { path = "../test" }
+mp4san-test = { path = "../mp4san-test" }
