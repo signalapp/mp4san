@@ -17,8 +17,8 @@
 //! # Ok::<(), webpsan::Error>(())
 //! ```
 //!
-//! The [`parse`] module also contains a less stable and undocumented API which can be used to parse individual MP4 box
-//! types.
+//! The [`parse`] module also contains a less stable and undocumented API which can be used to parse individual WebP
+//! chunk types.
 //!
 //! [`Seek`]: std::io::Seek
 

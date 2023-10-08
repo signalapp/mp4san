@@ -8,8 +8,8 @@ rust-version.workspace = true
 
 repository.workspace = true
 license.workspace = true
-categories = ["multimedia::video"]
-keywords = ["mp4", "sanitizer", "video", "media"]
+categories = ["multimedia"]
+keywords = ["sanitizer", "media"]
 
 readme = "../README.md"
 exclude.workspace = true
