@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use std::io::Cursor;
 use std::mem::replace;
 use std::num::NonZeroU32;
@@ -79,5 +81,9 @@ impl<R: AsyncRead + Unpin, E: Endianness> BitBufReader<R, E> {
             }
             _ => bail_attach!(ParseError::InvalidInput, InvalidLz77PrefixCode(prefix_code)),
         }
+    }
+
+    pub fn reader(&mut self) -> &mut BitReader<Cursor<Vec<u8>>, E> {
+        &mut self.reader
     }
 }

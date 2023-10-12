@@ -31,4 +31,9 @@ thiserror = "1.0.38"
 
 [dev-dependencies]
 assert_matches = "1.5.0"
+criterion = { version = "0.5.1", features = ["async_futures"] }
 mediasan-common-test = { path = "../common-test" }
+
+[[bench]]
+name = "bitstream"
+harness = false
