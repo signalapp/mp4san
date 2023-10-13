@@ -85,7 +85,7 @@ struct ColorCache {
 enum MetaPrefixCodes {
     #[display(fmt = "single meta prefix code")]
     Single,
-    #[display(fmt = "multiple meta prefix codes: {max_code_group} code groups, block size {block_size}")]
+    #[display(fmt = "multiple meta prefix codes: max code group {max_code_group}, block size {block_size}")]
     Multiple {
         block_size: u16,
         max_code_group: u16,
