@@ -12,7 +12,7 @@ use num_traits::AsPrimitive;
 
 use crate::{Error, ResultExt};
 
-use super::bitstream::{BitBufReader, CanonicalHuffmanTree};
+use super::bitstream::{BitBufReader, CanonicalHuffmanTree, LZ77_MAX_LEN};
 use super::ParseError;
 
 #[derive(Clone)]
@@ -316,21 +316,23 @@ impl EntropyCodedImage {
     ) -> Result<Self, Error> {
         let color_cache = ColorCache::read(reader).await.while_parsing_type()?;
         let codes = PrefixCodeGroup::read(reader, &color_cache).await.while_parsing_type()?;
+        let readahead_bits = codes.readahead_bits();
 
         let len = width.saturating_mul(height);
         let mut pixel_idx = 0;
         while pixel_idx < len.get() {
-            match reader.read_huffman(&codes.green.tree).await? {
+            if reader.buf_bits() < u64::from(readahead_bits) {
+                reader.fill_buf().await?;
+            }
+            match reader.buf_read_huffman(&codes.green.tree)? {
                 symbol @ 0..=255 => {
-                    let color = Color::read(reader, symbol as u8, &codes).await.while_parsing_type()?;
+                    let color = Color::buf_read(reader, symbol as u8, &codes).while_parsing_type()?;
                     log::debug!("color: {color}");
                     fun(color)?;
                     pixel_idx += 1;
                 }
                 symbol @ 256..=279 => {
-                    let back_ref = BackReference::read(reader, symbol - 256, &codes, width)
-                        .await
-                        .while_parsing_type()?;
+                    let back_ref = BackReference::buf_read(reader, symbol - 256, &codes, width).while_parsing_type()?;
                     log::debug!("backref: {back_ref}");
                     ensure_matches_attach!(
                         pixel_idx.checked_sub(back_ref.dist.get()),
@@ -412,15 +414,15 @@ impl BackReference {
     ];
     const DISTANCE_MAP_LEN: u32 = Self::DISTANCE_MAP.len() as u32;
 
-    async fn read<R: AsyncRead + Unpin>(
+    fn buf_read<R: AsyncRead + Unpin>(
         reader: &mut BitBufReader<R, LE>,
         len_symbol: u16,
         codes: &PrefixCodeGroup,
         width: NonZeroU32,
     ) -> Result<Self, Error> {
-        let len = reader.read_lz77(len_symbol).await?;
-        let dist_symbol = reader.read_huffman(&codes.distance.tree).await?;
-        let dist_code = reader.read_lz77(dist_symbol.into()).await?;
+        let len = reader.buf_read_lz77(len_symbol)?;
+        let dist_symbol = reader.buf_read_huffman(&codes.distance.tree)?;
+        let dist_code = reader.buf_read_lz77(dist_symbol.into())?;
         let dist = match dist_code.get() {
             0 => unreachable!(),
             dist_code @ 1..=Self::DISTANCE_MAP_LEN => {
@@ -434,6 +436,10 @@ impl BackReference {
         };
         Ok(Self { dist, len })
     }
+
+    fn readahead_bits(codes: &PrefixCodeGroup) -> u32 {
+        2 * u32::from(LZ77_MAX_LEN) + codes.distance.tree.longest_code_len()
+    }
 }
 
 //
@@ -441,16 +447,16 @@ impl BackReference {
 //
 
 impl Color {
-    async fn read<R: AsyncRead + Unpin>(
+    fn buf_read<R: AsyncRead + Unpin>(
         reader: &mut BitBufReader<R, LE>,
         green: u8,
         codes: &PrefixCodeGroup,
     ) -> Result<Self, Error> {
         Ok(Self {
             green,
-            red: reader.read_huffman(&codes.red.tree).await? as u8,
-            blue: reader.read_huffman(&codes.blue.tree).await? as u8,
-            alpha: reader.read_huffman(&codes.alpha.tree).await? as u8,
+            red: reader.buf_read_huffman(&codes.red.tree)?,
+            blue: reader.buf_read_huffman(&codes.blue.tree)?,
+            alpha: reader.buf_read_huffman(&codes.alpha.tree)?,
         })
     }
 }
@@ -615,6 +621,18 @@ impl PrefixCodeGroup {
             CanonicalHuffmanTree::new(&mut code_lengths)?
         };
         Ok(T::new(tree))
+    }
+
+    pub fn argb_readahead_bits(&self) -> u32 {
+        self.alpha.tree.longest_code_len()
+            + self.red.tree.longest_code_len()
+            + self.green.tree.longest_code_len()
+            + self.blue.tree.longest_code_len()
+    }
+
+    pub fn readahead_bits(&self) -> u32 {
+        self.argb_readahead_bits()
+            .max(self.green.tree.longest_code_len() + BackReference::readahead_bits(self))
     }
 }
 

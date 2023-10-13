@@ -30,6 +30,10 @@ pub struct CanonicalHuffmanTree<E: Endianness, S: Clone> {
 #[display(fmt = "invalid lz77 prefix code `{_0}`")]
 struct InvalidLz77PrefixCode(u16);
 
+pub const LZ77_MAX_LEN: u16 = (LZ77_MAX_SYMBOL - 2) >> 1;
+
+const LZ77_MAX_SYMBOL: u16 = 39;
+
 //
 // BitBufReader impls
 //
@@ -39,61 +43,86 @@ impl<R: AsyncRead + Unpin, E: Endianness> BitBufReader<R, E> {
         Self { input, reader: BitReader::new(Cursor::new(Vec::with_capacity(capacity))), buf_len: 0 }
     }
 
-    pub async fn ensure_bits(&mut self, bits: u32) -> Result<(), Error> {
-        let bit_pos = self.reader.position_in_bits()?;
+    pub async fn fill_buf(&mut self) -> Result<(), Error> {
+        let bit_pos = self.buf_bit_pos();
         let byte_pos = (bit_pos / 8) as usize;
-        if self.buf_len as u64 * 8 - bit_pos < bits.into() {
-            let reader = replace(&mut self.reader, BitReader::new(Cursor::new(Vec::new())));
-            let mut buf = reader.into_reader().into_inner();
 
-            buf.drain(..byte_pos);
-            (&mut self.input)
-                .take((buf.capacity() - buf.len()) as u64)
-                .read_to_end(&mut buf)
-                .await?;
-            self.buf_len = buf.len();
+        let Some(input) = self.input.as_mut() else {
+            return Ok(());
+        };
 
-            self.reader = BitReader::new(Cursor::new(buf));
-            self.reader.skip((bit_pos % 8) as u32)?;
-        }
+        let reader = replace(&mut self.reader, BitReader::new(Cursor::new(Vec::new())));
+        let mut buf = reader.into_reader().into_inner();
+
+        buf.drain(..byte_pos);
+        (&mut self.input)
+            .take((buf.capacity() - buf.len()) as u64)
+            .read_to_end(&mut buf)
+            .await?;
+        self.buf_len = buf.len();
+
+        self.reader = BitReader::new(Cursor::new(buf));
+        self.reader.skip((bit_pos % 8) as u32)?;
         Ok(())
     }
 
-    pub async fn read_bit(&mut self) -> Result<bool, Error> {
-        self.ensure_bits(1).await?;
-        self.reader
-            .read_bit()
-            .map_eof(|_| Error::Parse(report_attach!(ParseError::TruncatedChunk)))
+    pub fn buf_bits(&mut self) -> u64 {
+        self.buf_len as u64 * 8 - self.buf_bit_pos()
     }
 
-    pub async fn read<T: Numeric>(&mut self, bits: u32) -> Result<T, Error> {
-        self.ensure_bits(bits).await?;
+    pub fn buf_read<T: Numeric>(&mut self, bits: u32) -> Result<T, Error> {
         self.reader
             .read(bits)
             .map_eof(|_| Error::Parse(report_attach!(ParseError::TruncatedChunk)))
     }
 
-    pub async fn read_huffman<T: Clone>(&mut self, tree: &CanonicalHuffmanTree<E, T>) -> Result<T, Error> {
-        self.ensure_bits(tree.longest_code_len).await?;
+    pub fn buf_read_bit(&mut self) -> Result<bool, Error> {
+        self.reader
+            .read_bit()
+            .map_eof(|_| Error::Parse(report_attach!(ParseError::TruncatedChunk)))
+    }
+
+    pub fn buf_read_huffman<T: Clone>(&mut self, tree: &CanonicalHuffmanTree<E, T>) -> Result<T, Error> {
         self.reader
             .read_huffman(&tree.read_tree)
             .map_eof(|_| Error::Parse(report_attach!(ParseError::TruncatedChunk)))
     }
 
-    pub async fn read_lz77(&mut self, prefix_code: u16) -> Result<NonZeroU32, Error> {
+    pub fn buf_read_lz77(&mut self, prefix_code: u16) -> Result<NonZeroU32, Error> {
         match prefix_code {
             0..=3 => Ok(NonZeroU32::MIN.saturating_add(prefix_code.into())),
-            4..=39 => {
+            4..=LZ77_MAX_SYMBOL => {
                 let extra_bits = (u32::from(prefix_code) - 2) >> 1;
                 let offset = (2 + (u32::from(prefix_code) & 1)) << extra_bits;
-                Ok(NonZeroU32::MIN.saturating_add(offset + self.read::<u32>(extra_bits).await?))
+                Ok(NonZeroU32::MIN.saturating_add(offset + self.buf_read::<u32>(extra_bits)?))
             }
             _ => bail_attach!(ParseError::InvalidInput, InvalidLz77PrefixCode(prefix_code)),
         }
     }
 
-    pub fn reader(&mut self) -> &mut BitReader<Cursor<Vec<u8>>, E> {
-        &mut self.reader
+    pub async fn read<T: Numeric>(&mut self, bits: u32) -> Result<T, Error> {
+        if self.buf_bits() < bits.into() {
+            self.fill_buf().await?;
+        }
+        self.buf_read(bits)
+    }
+
+    pub async fn read_bit(&mut self) -> Result<bool, Error> {
+        if self.buf_bits() < 1 {
+            self.fill_buf().await?;
+        }
+        self.buf_read_bit()
+    }
+
+    pub async fn read_huffman<T: Clone>(&mut self, tree: &CanonicalHuffmanTree<E, T>) -> Result<T, Error> {
+        if self.buf_bits() < tree.longest_code_len.into() {
+            self.fill_buf().await?;
+        }
+        self.buf_read_huffman(tree)
+    }
+
+    fn buf_bit_pos(&mut self) -> u64 {
+        self.reader.position_in_bits().unwrap_or_else(|_| unreachable!())
     }
 }
 
