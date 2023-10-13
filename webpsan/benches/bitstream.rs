@@ -9,7 +9,12 @@ use futures_util::AsyncRead;
 use webpsan::parse::{BitBufReader, CanonicalHuffmanTree};
 use webpsan::Error;
 
-criterion_group!(benches, read_huffman_one_symbol, read_huffman_two_symbols);
+criterion_group!(
+    benches,
+    read_huffman_one_symbol,
+    read_huffman_two_symbols,
+    read_huffman_256_symbols
+);
 criterion_main!(benches);
 
 struct BlackBoxZeroesInput;
@@ -28,7 +33,13 @@ pub fn read_huffman_one_symbol(c: &mut Criterion) {
 
 pub fn read_huffman_two_symbols(c: &mut Criterion) {
     let group = c.benchmark_group("two symbols");
-    let code = CanonicalHuffmanTree::new(&mut [((), 1), ((), 1)]).unwrap();
+    let code = CanonicalHuffmanTree::new(&mut [((), 1); 2]).unwrap();
+    read_huffman(group, &code);
+}
+
+pub fn read_huffman_256_symbols(c: &mut Criterion) {
+    let group = c.benchmark_group("256 symbols");
+    let code = CanonicalHuffmanTree::new(&mut [((), 8); 256]).unwrap();
     read_huffman(group, &code);
 }
 
