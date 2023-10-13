@@ -801,4 +801,10 @@ mod test {
             assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
         });
     }
+
+    #[test]
+    pub fn lossless_max_image_data() {
+        let data = b"\x2f\xff\xff\xff\x0f\x81\x88\x88\x18\x44\x44\xc4\xff\x45\x44\x04\x21\x22\x22\x22\x22\x02";
+        test_webp().image_data(&data[..]).build().sanitize_ok();
+    }
 }

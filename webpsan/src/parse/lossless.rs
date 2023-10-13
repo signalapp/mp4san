@@ -316,6 +316,7 @@ impl EntropyCodedImage {
     ) -> Result<Self, Error> {
         let color_cache = ColorCache::read(reader).await.while_parsing_type()?;
         let codes = PrefixCodeGroup::read(reader, &color_cache).await.while_parsing_type()?;
+        let argb_readahead_bits = codes.argb_readahead_bits();
         let readahead_bits = codes.readahead_bits();
 
         let len = width.saturating_mul(height);
@@ -329,7 +330,11 @@ impl EntropyCodedImage {
                     let color = Color::buf_read(reader, symbol as u8, &codes).while_parsing_type()?;
                     log::debug!("color: {color}");
                     fun(color)?;
-                    pixel_idx += 1;
+                    if argb_readahead_bits == 0 {
+                        pixel_idx = len.get();
+                    } else {
+                        pixel_idx += 1;
+                    }
                 }
                 symbol @ 256..=279 => {
                     let back_ref = BackReference::buf_read(reader, symbol - 256, &codes, width).while_parsing_type()?;
