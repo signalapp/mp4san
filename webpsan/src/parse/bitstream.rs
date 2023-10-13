@@ -16,7 +16,7 @@ use crate::parse::ParseError;
 use crate::Error;
 
 pub struct BitBufReader<R, E: Endianness> {
-    input: R,
+    input: Option<R>,
     reader: BitReader<Cursor<Vec<u8>>, E>,
     buf_len: usize,
 }
@@ -40,7 +40,7 @@ const LZ77_MAX_SYMBOL: u16 = 39;
 
 impl<R: AsyncRead + Unpin, E: Endianness> BitBufReader<R, E> {
     pub fn with_capacity(input: R, capacity: usize) -> Self {
-        Self { input, reader: BitReader::new(Cursor::new(Vec::with_capacity(capacity))), buf_len: 0 }
+        Self { input: Some(input), reader: BitReader::new(Cursor::new(Vec::with_capacity(capacity))), buf_len: 0 }
     }
 
     pub async fn fill_buf(&mut self) -> Result<(), Error> {
@@ -55,10 +55,13 @@ impl<R: AsyncRead + Unpin, E: Endianness> BitBufReader<R, E> {
         let mut buf = reader.into_reader().into_inner();
 
         buf.drain(..byte_pos);
-        (&mut self.input)
+        input
             .take((buf.capacity() - buf.len()) as u64)
             .read_to_end(&mut buf)
             .await?;
+        if self.buf_len - byte_pos == buf.len() {
+            self.input = None;
+        }
         self.buf_len = buf.len();
 
         self.reader = BitReader::new(Cursor::new(buf));
