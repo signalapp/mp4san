@@ -3,18 +3,16 @@
 use std::fmt::Debug;
 use std::num::{NonZeroU32, NonZeroU8};
 
-use bitstream_io::huffman::{compile_read_tree, ReadHuffmanTree};
 use bitstream_io::{Numeric, LE};
 use derive_more::Display;
 use futures_util::AsyncRead;
-use mediasan_common::report_attach;
 use mediasan_common::{ensure_attach, ensure_matches_attach};
 use num_integer::div_ceil;
 use num_traits::AsPrimitive;
 
 use crate::{Error, ResultExt};
 
-use super::bitstream::BitBufReader;
+use super::bitstream::{BitBufReader, CanonicalHuffmanTree};
 use super::ParseError;
 
 #[derive(Clone)]
@@ -96,7 +94,7 @@ enum MetaPrefixCodes {
 trait PrefixCode {
     type Symbol: Numeric;
 
-    fn new(read_tree: Box<[ReadHuffmanTree<LE, Self::Symbol>]>) -> Self;
+    fn new(tree: CanonicalHuffmanTree<LE, Self::Symbol>) -> Self;
 
     fn alphabet_size(color_cache_len: u16) -> u16;
 }
@@ -110,19 +108,19 @@ struct PrefixCodeGroup {
 }
 
 struct CodeLengthPrefixCode {
-    read_tree: Box<[ReadHuffmanTree<LE, u8>]>,
+    tree: CanonicalHuffmanTree<LE, u8>,
 }
 
 struct GreenPrefixCode {
-    read_tree: Box<[ReadHuffmanTree<LE, u16>]>,
+    tree: CanonicalHuffmanTree<LE, u16>,
 }
 
 struct ARBPrefixCode {
-    read_tree: Box<[ReadHuffmanTree<LE, u8>]>,
+    tree: CanonicalHuffmanTree<LE, u8>,
 }
 
 struct DistancePrefixCode {
-    read_tree: Box<[ReadHuffmanTree<LE, u8>]>,
+    tree: CanonicalHuffmanTree<LE, u8>,
 }
 
 #[derive(Clone, Copy, Debug, Display)]
@@ -322,7 +320,7 @@ impl EntropyCodedImage {
         let len = width.saturating_mul(height);
         let mut pixel_idx = 0;
         while pixel_idx < len.get() {
-            match reader.read_huffman(&codes.green.read_tree).await? {
+            match reader.read_huffman(&codes.green.tree).await? {
                 symbol @ 0..=255 => {
                     let color = Color::read(reader, symbol as u8, &codes).await.while_parsing_type()?;
                     log::debug!("color: {color}");
@@ -421,7 +419,7 @@ impl BackReference {
         width: NonZeroU32,
     ) -> Result<Self, Error> {
         let len = reader.read_lz77(len_symbol).await?;
-        let dist_symbol = reader.read_huffman(&codes.distance.read_tree).await?;
+        let dist_symbol = reader.read_huffman(&codes.distance.tree).await?;
         let dist_code = reader.read_lz77(dist_symbol.into()).await?;
         let dist = match dist_code.get() {
             0 => unreachable!(),
@@ -450,9 +448,9 @@ impl Color {
     ) -> Result<Self, Error> {
         Ok(Self {
             green,
-            red: reader.read_huffman(&codes.red.read_tree).await? as u8,
-            blue: reader.read_huffman(&codes.blue.read_tree).await? as u8,
-            alpha: reader.read_huffman(&codes.alpha.read_tree).await? as u8,
+            red: reader.read_huffman(&codes.red.tree).await? as u8,
+            blue: reader.read_huffman(&codes.blue.tree).await? as u8,
+            alpha: reader.read_huffman(&codes.alpha.tree).await? as u8,
         })
     }
 }
@@ -553,7 +551,7 @@ impl PrefixCodeGroup {
         T::Symbol: Copy + Ord + 'static,
     {
         let simple_code_length_code = reader.read_bit().await?;
-        let symbols = if simple_code_length_code {
+        let tree = if simple_code_length_code {
             let has_second_symbol = reader.read_bit().await?;
 
             let is_first_symbol_8bits = reader.read_bit().await?;
@@ -562,12 +560,13 @@ impl PrefixCodeGroup {
             } else {
                 Numeric::from_u8(reader.read_bit().await? as u8)
             };
-            if has_second_symbol {
+            let symbols = if has_second_symbol {
                 let second_symbol = reader.read(8).await?;
                 vec![(first_symbol, vec![0]), (second_symbol, vec![1])]
             } else {
                 vec![(first_symbol, vec![])]
-            }
+            };
+            CanonicalHuffmanTree::from_symbols(symbols)?
         } else {
             let code_length_code = CodeLengthPrefixCode::read(reader).await?;
 
@@ -589,7 +588,7 @@ impl PrefixCodeGroup {
             let mut code_lengths = Vec::with_capacity(max_symbols as usize);
             let mut last_non_zero_code_length = NonZeroU8::new(8).unwrap_or_else(|| unreachable!());
             while code_lengths.len() < max_symbols as usize {
-                let code_length_code = reader.read_huffman(&code_length_code.read_tree).await?;
+                let code_length_code = reader.read_huffman(&code_length_code.tree).await?;
                 let (code_length, repeat_times) = match code_length_code {
                     0..=15 => (code_length_code, 1),
                     16 => (last_non_zero_code_length.get(), 3 + reader.read::<u8>(2).await?),
@@ -613,13 +612,9 @@ impl PrefixCodeGroup {
             }
 
             log::debug!("code_lengths: {code_lengths:?}");
-            canonical_tree_symbols(&mut code_lengths)
+            CanonicalHuffmanTree::new(&mut code_lengths)?
         };
-        log::debug!("symbols: {symbols:?}");
-
-        let read_tree =
-            compile_read_tree(symbols).map_err(|err| report_attach!(ParseError::InvalidVp8lPrefixCode, err))?;
-        Ok(T::new(read_tree))
+        Ok(T::new(tree))
     }
 }
 
@@ -642,13 +637,8 @@ impl CodeLengthPrefixCode {
             code_lengths[usize::from(code_length_idx)] = (code_length_idx, 0);
         }
 
-        log::debug!("code_length_code_lengths: {code_lengths:?}");
-        let symbols = canonical_tree_symbols(&mut code_lengths);
-        log::debug!("code_length_symbols: {symbols:?}");
-        let read_tree = compile_read_tree(symbols)
-            .map_err(|err| report_attach!(ParseError::InvalidVp8lPrefixCode, "invalid code length code", err))?;
-
-        Ok(Self { read_tree })
+        let tree = CanonicalHuffmanTree::new(&mut code_lengths).attach_printable("while parsing code length code")?;
+        Ok(Self { tree })
     }
 }
 
@@ -659,8 +649,8 @@ impl CodeLengthPrefixCode {
 impl PrefixCode for GreenPrefixCode {
     type Symbol = u16;
 
-    fn new(read_tree: Box<[ReadHuffmanTree<LE, Self::Symbol>]>) -> Self {
-        Self { read_tree }
+    fn new(tree: CanonicalHuffmanTree<LE, Self::Symbol>) -> Self {
+        Self { tree }
     }
 
     fn alphabet_size(color_cache_len: u16) -> u16 {
@@ -675,8 +665,8 @@ impl PrefixCode for GreenPrefixCode {
 impl PrefixCode for ARBPrefixCode {
     type Symbol = u8;
 
-    fn new(read_tree: Box<[ReadHuffmanTree<LE, Self::Symbol>]>) -> Self {
-        Self { read_tree }
+    fn new(tree: CanonicalHuffmanTree<LE, Self::Symbol>) -> Self {
+        Self { tree }
     }
 
     fn alphabet_size(_color_cache_len: u16) -> u16 {
@@ -691,8 +681,8 @@ impl PrefixCode for ARBPrefixCode {
 impl PrefixCode for DistancePrefixCode {
     type Symbol = u8;
 
-    fn new(read_tree: Box<[ReadHuffmanTree<LE, Self::Symbol>]>) -> Self {
-        Self { read_tree }
+    fn new(tree: CanonicalHuffmanTree<LE, Self::Symbol>) -> Self {
+        Self { tree }
     }
 
     fn alphabet_size(_color_cache_len: u16) -> u16 {
@@ -703,38 +693,6 @@ impl PrefixCode for DistancePrefixCode {
 //
 // private functions
 //
-
-fn canonical_tree_symbols<S>(code_lengths: &mut [(S, u8)]) -> Vec<(S, Vec<u8>)>
-where
-    S: Copy + Ord + 'static,
-{
-    code_lengths.sort_unstable_by_key(|&(symbol, code_length)| (code_length, symbol));
-    let zero_code_length_count = code_lengths.partition_point(|&(_, code_length)| code_length == 0);
-
-    match (&code_lengths[zero_code_length_count..], &*code_lengths) {
-        (&[(first_symbol, 1)], _) => vec![(first_symbol, vec![])],
-
-        (&[(first_symbol, first_code_length), ref rest_code_lengths @ ..], &[.., (_, last_code_length)]) => {
-            let mut code = Vec::with_capacity(last_code_length.into());
-            code.resize(first_code_length.into(), 0);
-
-            let mut symbols = Vec::with_capacity(code_lengths.len());
-            symbols.push((first_symbol, code.clone()));
-            for &(symbol, code_length) in rest_code_lengths {
-                for code_bit in code.iter_mut().rev() {
-                    *code_bit ^= 1;
-                    if *code_bit == 1 {
-                        break;
-                    }
-                }
-                code.resize(code_length.into(), 0);
-                symbols.push((symbol, code.clone()));
-            }
-            symbols
-        }
-        _ => vec![],
-    }
-}
 
 fn len_in_blocks(len: NonZeroU32, block_size: u16) -> NonZeroU32 {
     NonZeroU32::new(div_ceil(len.get(), block_size.into())).unwrap_or_else(|| unreachable!())

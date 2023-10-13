@@ -31,7 +31,7 @@ pub trait ParsedChunk {
 pub use alph::{AlphChunk, AlphFlags};
 pub use anim::AnimChunk;
 pub use anmf::{AnmfChunk, AnmfFlags};
-pub use bitstream::BitBufReader;
+pub use bitstream::{BitBufReader, CanonicalHuffmanTree};
 pub use error::ParseError;
 pub use header::{chunk_type, ChunkHeader, WebpChunk};
 pub use integers::{OneBasedU24, Reserved, WebmFlags, WebmPrim, U24};

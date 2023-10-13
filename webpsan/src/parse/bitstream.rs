@@ -1,10 +1,11 @@
 #![allow(missing_docs)]
 
+use std::fmt::Debug;
 use std::io::Cursor;
 use std::mem::replace;
 use std::num::NonZeroU32;
 
-use bitstream_io::huffman::ReadHuffmanTree;
+use bitstream_io::huffman::{compile_read_tree, ReadHuffmanTree};
 use bitstream_io::{BitRead, BitReader, Endianness, HuffmanRead, Numeric};
 use derive_more::Display;
 use futures_util::{AsyncRead, AsyncReadExt};
@@ -20,9 +21,18 @@ pub struct BitBufReader<R, E: Endianness> {
     buf_len: usize,
 }
 
+pub struct CanonicalHuffmanTree<E: Endianness, S: Clone> {
+    read_tree: Box<[ReadHuffmanTree<E, S>]>,
+    longest_code_len: u32,
+}
+
 #[derive(Display)]
 #[display(fmt = "invalid lz77 prefix code `{_0}`")]
 struct InvalidLz77PrefixCode(u16);
+
+//
+// BitBufReader impls
+//
 
 impl<R: AsyncRead + Unpin, E: Endianness> BitBufReader<R, E> {
     pub fn with_capacity(input: R, capacity: usize) -> Self {
@@ -63,11 +73,10 @@ impl<R: AsyncRead + Unpin, E: Endianness> BitBufReader<R, E> {
             .map_eof(|_| Error::Parse(report_attach!(ParseError::TruncatedChunk)))
     }
 
-    pub async fn read_huffman<T: Clone>(&mut self, tree: &[ReadHuffmanTree<E, T>]) -> Result<T, Error> {
-        // XXX calculate longest huffman code
-        self.ensure_bits(128).await?;
+    pub async fn read_huffman<T: Clone>(&mut self, tree: &CanonicalHuffmanTree<E, T>) -> Result<T, Error> {
+        self.ensure_bits(tree.longest_code_len).await?;
         self.reader
-            .read_huffman(tree)
+            .read_huffman(&tree.read_tree)
             .map_eof(|_| Error::Parse(report_attach!(ParseError::TruncatedChunk)))
     }
 
@@ -85,5 +94,76 @@ impl<R: AsyncRead + Unpin, E: Endianness> BitBufReader<R, E> {
 
     pub fn reader(&mut self) -> &mut BitReader<Cursor<Vec<u8>>, E> {
         &mut self.reader
+    }
+}
+
+//
+// CanonicalHuffmanTree impls
+//
+
+impl<E: Endianness, S: Clone> CanonicalHuffmanTree<E, S> {
+    pub fn new(code_lengths: &mut [(S, u8)]) -> Result<Self, Error>
+    where
+        S: Copy + Debug + Ord + 'static,
+    {
+        let longest_code_len = u32::from(code_lengths.iter().map(|&(_, len)| len).max().unwrap_or_default());
+        let symbols = Self::symbols(code_lengths);
+        log::debug!("symbols: {symbols:?}");
+        let read_tree =
+            compile_read_tree(symbols).map_err(|err| report_attach!(ParseError::InvalidVp8lPrefixCode, err))?;
+        Ok(Self { read_tree, longest_code_len })
+    }
+
+    pub fn from_symbols(symbols: Vec<(S, Vec<u8>)>) -> Result<Self, Error> {
+        let longest_code_len = symbols.iter().map(|(_, code)| code.len()).max().unwrap_or_default() as u32;
+        let read_tree =
+            compile_read_tree(symbols).map_err(|err| report_attach!(ParseError::InvalidVp8lPrefixCode, err))?;
+        Ok(Self { read_tree, longest_code_len })
+    }
+
+    pub fn read_tree(&self) -> &[ReadHuffmanTree<E, S>] {
+        &self.read_tree
+    }
+
+    pub fn longest_code_len(&self) -> u32 {
+        self.longest_code_len
+    }
+
+    fn symbols(code_lengths: &mut [(S, u8)]) -> Vec<(S, Vec<u8>)>
+    where
+        S: Copy + Ord + 'static,
+    {
+        code_lengths.sort_unstable_by_key(|&(symbol, code_length)| (code_length, symbol));
+        let zero_code_length_count = code_lengths.partition_point(|&(_, code_length)| code_length == 0);
+
+        match (&code_lengths[zero_code_length_count..], &*code_lengths) {
+            (&[(first_symbol, 1)], _) => vec![(first_symbol, vec![])],
+
+            (&[(first_symbol, first_code_length), ref rest_code_lengths @ ..], &[.., (_, last_code_length)]) => {
+                let mut code = Vec::with_capacity(last_code_length.into());
+                code.resize(first_code_length.into(), 0);
+
+                let mut symbols = Vec::with_capacity(code_lengths.len());
+                symbols.push((first_symbol, code.clone()));
+                for &(symbol, code_length) in rest_code_lengths {
+                    for code_bit in code.iter_mut().rev() {
+                        *code_bit ^= 1;
+                        if *code_bit == 1 {
+                            break;
+                        }
+                    }
+                    code.resize(code_length.into(), 0);
+                    symbols.push((symbol, code.clone()));
+                }
+                symbols
+            }
+            _ => vec![],
+        }
+    }
+}
+
+impl<E: Endianness, S: Clone + Default> Default for CanonicalHuffmanTree<E, S> {
+    fn default() -> Self {
+        Self::from_symbols(vec![(S::default(), vec![])]).unwrap_or_else(|_| unreachable!())
     }
 }
