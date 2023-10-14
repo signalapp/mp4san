@@ -30,9 +30,13 @@ pub struct TestWebpSpec {
     #[builder(default, setter(into, each(name = "add_anmf")))]
     anmfs: Vec<TestAnmfSpecBuilder>,
 
-    #[builder(default = "DEFAULT_IMAGE_DATA.to_vec()")]
-    #[builder(setter(into, each(name = "add_image_data", into)))]
-    image_data: Vec<u8>,
+    #[builder(default = "DEFAULT_VP8L_DATA.to_vec()")]
+    #[builder(setter(into, each(name = "add_vp8l_data", into)))]
+    vp8l_data: Vec<u8>,
+
+    #[builder(default = "DEFAULT_VP8_DATA.to_vec()")]
+    #[builder(setter(into, each(name = "add_vp8_data", into)))]
+    vp8_data: Vec<u8>,
 
     #[builder(default = "vec![VP8L]")]
     #[builder(setter(into, each(name = "add_chunk")))]
@@ -84,9 +88,13 @@ pub struct TestAnmfSpec {
     #[builder(default)]
     alph: TestAlphSpecBuilder,
 
-    #[builder(default = "DEFAULT_IMAGE_DATA.to_vec()")]
-    #[builder(setter(into, each(name = "add_image_data", into)))]
-    image_data: Vec<u8>,
+    #[builder(default = "DEFAULT_VP8L_DATA.to_vec()")]
+    #[builder(setter(into, each(name = "add_vp8l_data", into)))]
+    vp8l_data: Vec<u8>,
+
+    #[builder(default = "DEFAULT_VP8_DATA.to_vec()")]
+    #[builder(setter(into, each(name = "add_vp8_data", into)))]
+    vp8_data: Vec<u8>,
 
     #[builder(default = "vec![VP8L]")]
     #[builder(setter(into, each(name = "add_chunk")))]
@@ -105,7 +113,11 @@ pub struct TestFileHeaderSpec {
     pub name: FourCC,
 }
 
-const DEFAULT_IMAGE_DATA: &[u8] = &[
+const DEFAULT_VP8_DATA: &[u8] = &[
+    18, 1, 0, 157, 1, 42, 1, 0, 1, 0, 18, 0, 52, 0, 0, 13, 192, 0, 254, 251, 253, 80, 0, 0,
+];
+
+const DEFAULT_VP8L_DATA: &[u8] = &[
     // image-header: signature image-size alpha-is-used version
     0x2f,
     0b0000_0000,
@@ -150,9 +162,8 @@ impl TestWebpSpec {
 
         for chunk_type in &self.chunks {
             match *chunk_type {
-                VP8 | VP8L => {
-                    write_test_chunk(&mut data, &chunk_type.value, &self.image_data);
-                }
+                VP8L => write_test_chunk(&mut data, &chunk_type.value, &self.vp8l_data),
+                VP8 => write_test_chunk(&mut data, &chunk_type.value, &self.vp8_data),
                 VP8X => {
                     let spec = self.vp8x.build().unwrap();
                     let flags = spec.flags.unwrap_or_else(|| {
@@ -186,16 +197,15 @@ impl TestWebpSpec {
                 ANIM => write_test_anim(&mut data),
                 ANMF => {
                     let anmf = (!anmfs.is_empty()).then(|| anmfs.remove(0)).unwrap_or_default();
-                    let TestAnmfSpec { x, y, width, height, alph, image_data, chunks } = anmf.build().unwrap();
+                    let TestAnmfSpec { x, y, width, height, alph, vp8l_data, vp8_data, chunks } = anmf.build().unwrap();
                     let alph = alph.build().unwrap();
 
                     let mut anmf_data = vec![];
                     for chunk_type in chunks {
                         match chunk_type {
                             ALPH => write_test_alph(&mut anmf_data, alph.flags.bits(), &alph.image_data),
-                            VP8 | VP8L => {
-                                write_test_chunk(&mut anmf_data, &chunk_type.value, &image_data);
-                            }
+                            VP8L => write_test_chunk(&mut anmf_data, &chunk_type.value, &vp8l_data),
+                            VP8 => write_test_chunk(&mut anmf_data, &chunk_type.value, &vp8_data),
                             _ => panic!("invalid chunk type in ANMF for test {chunk_type}"),
                         }
                     }
