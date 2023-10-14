@@ -34,7 +34,7 @@ use derive_builder::Builder;
 use derive_more::Display;
 use futures_util::{pin_mut, AsyncRead};
 use mediasan_common::error::{ExtraUnparsedInput, WhileParsingType};
-use mediasan_common::{bail_attach, ensure_attach, sync, AsyncSkip, InputSpan, ResultExt, Skip};
+use mediasan_common::{bail_attach, ensure_attach, ensure_matches_attach, sync, AsyncSkip, InputSpan, ResultExt, Skip};
 use parse::error::WhileParsingChunk;
 
 use crate::parse::chunk_type::{ALPH, ANIM, ANMF, EXIF, ICCP, RIFF, VP8, VP8L, VP8X, XMP};
@@ -292,6 +292,12 @@ async fn sanitize_animated<R: AsyncRead + AsyncSkip>(
     let AnimChunk { .. } = reader.parse_data().await?;
     log::info!("{name} @ 0x{offset:08x}: {len} bytes", name = ANIM);
 
+    ensure_matches_attach!(
+        reader.peek_header().await?,
+        Some(ANMF),
+        ParseError::MissingRequiredChunk(ANMF),
+    );
+
     while let Some(ANMF) = reader.peek_header().await? {
         let InputSpan { offset, len } = reader.read_header(ANMF).await?;
         let anmf @ AnmfChunk { flags, .. } = reader.parse_data().await?;
@@ -528,7 +534,9 @@ mod test {
     #[test]
     pub fn vp8x_animated_empty() {
         let test = test_webp().chunks([VP8X, ANIM]).anmfs([]).build();
-        test.sanitize_ok();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.get_ref(), ParseError::MissingRequiredChunk(ANMF), "{err:?}");
+        });
     }
 
     #[test]
