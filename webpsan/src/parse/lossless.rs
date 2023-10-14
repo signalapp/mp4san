@@ -581,24 +581,30 @@ impl PrefixCodeGroup {
         } else {
             let code_length_code = CodeLengthPrefixCode::read(reader).await?;
 
-            let max_symbols = if reader.read_bit().await? {
+            let max_symbol_count = T::alphabet_size(color_cache.len());
+            let max_symbol_reads = if reader.read_bit().await? {
                 let length_bit_len = 2 + 2 * reader.read::<u32>(3).await?;
                 log::debug!("length_bit_len: {length_bit_len:?}");
                 2u16.saturating_add(reader.read(length_bit_len).await?)
             } else {
-                T::alphabet_size(color_cache.len())
+                max_symbol_count
             };
-            log::debug!("max_symbols: {max_symbols:?}");
+            log::debug!("max_symbol_count: {max_symbol_count:?}");
+            log::debug!("max_symbol_reads: {max_symbol_reads:?}");
 
             ensure_attach!(
-                max_symbols <= T::alphabet_size(color_cache.len()),
+                max_symbol_reads <= max_symbol_count,
                 ParseError::InvalidInput,
-                InvalidSymbolCount(max_symbols, T::alphabet_size(color_cache.len())),
+                InvalidSymbolCount(max_symbol_reads, max_symbol_count),
             );
 
-            let mut code_lengths = Vec::with_capacity(max_symbols as usize);
+            let mut code_lengths = Vec::with_capacity(max_symbol_count as usize);
             let mut last_non_zero_code_length = NonZeroU8::new(8).unwrap_or_else(|| unreachable!());
-            while code_lengths.len() < max_symbols as usize {
+            for _ in 0..max_symbol_reads {
+                if code_lengths.len() == max_symbol_count.into() {
+                    break;
+                }
+
                 let code_length_code = reader.read_huffman(&code_length_code.tree).await?;
                 let (code_length, repeat_times) = match code_length_code {
                     0..=15 => (code_length_code, 1),
@@ -613,9 +619,9 @@ impl PrefixCodeGroup {
 
                 let new_code_lengths_len = code_lengths.len() + usize::from(repeat_times);
                 ensure_attach!(
-                    new_code_lengths_len <= usize::from(max_symbols),
+                    new_code_lengths_len <= usize::from(max_symbol_count),
                     ParseError::InvalidVp8lPrefixCode,
-                    InvalidCodeLengthRepetition(repeat_times, code_lengths.len(), max_symbols)
+                    InvalidCodeLengthRepetition(repeat_times, code_lengths.len(), max_symbol_count)
                 );
                 let new_code_lengths =
                     (code_lengths.len()..new_code_lengths_len).map(|symbol| (symbol.as_(), code_length));
