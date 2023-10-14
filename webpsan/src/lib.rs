@@ -704,7 +704,7 @@ mod test {
     pub fn vp8x_wrong_order() {
         let test = test_webp().chunks([VP8L, VP8X]).build();
         assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
-            assert_matches!(err.get_ref(), ParseError::InvalidInput, "{err:?}");
+            assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
         });
     }
 
