@@ -181,11 +181,23 @@ pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(input: R, conf
         }
     }
 
-    ensure_attach!(
-        !reader.has_remaining().await?,
-        ParseError::InvalidInput,
-        ExtraUnparsedInput,
-    );
+    // It's not clear whether the WebP spec accepts unknown chunks at the end of simple format files, but many of the
+    // WebP test vectors contain non-standard trailing informational chunks.
+    while reader.has_remaining().await? {
+        let (name, InputSpan { offset, len }) = reader
+            .read_any_header()
+            .await
+            .attach_printable("while parsing unknown chunks")?;
+        match name {
+            ALPH | ANIM | EXIF | ICCP | VP8 | VP8L | VP8X | XMP => {
+                bail_attach!(ParseError::InvalidChunkLayout, MultipleChunks(name))
+            }
+            ANMF => bail_attach!(ParseError::InvalidChunkLayout, "non-contiguous ANMF chunk"),
+            _ => ensure_attach!(config.allow_unknown_chunks, ParseError::UnsupportedChunk(name)),
+        }
+        reader.skip_data().await?;
+        log::info!("{name} @ 0x{offset:08x}: {len} bytes");
+    }
 
     ensure_attach!(
         !file_reader.has_remaining().await?,
@@ -225,22 +237,6 @@ async fn sanitize_extended<R: AsyncRead + AsyncSkip>(
         let InputSpan { offset, len } = reader.read_header(XMP).await?;
         reader.skip_data().await?;
         log::info!("{name} @ 0x{offset:08x}: {len} bytes", name = XMP);
-    }
-
-    while reader.has_remaining().await? {
-        let (name, InputSpan { offset, len }) = reader
-            .read_any_header()
-            .await
-            .attach_printable("while parsing unknown chunks")?;
-        match name {
-            ALPH | ANIM | EXIF | ICCP | VP8 | VP8L | VP8X | XMP => {
-                bail_attach!(ParseError::InvalidChunkLayout, MultipleChunks(name))
-            }
-            ANMF => bail_attach!(ParseError::InvalidChunkLayout, "non-contiguous ANMF chunk"),
-            _ => ensure_attach!(config.allow_unknown_chunks, ParseError::UnsupportedChunk(name)),
-        }
-        reader.skip_data().await?;
-        log::info!("{name} @ 0x{offset:08x}: {len} bytes");
     }
 
     Ok(())
