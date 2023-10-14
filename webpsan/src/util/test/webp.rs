@@ -5,10 +5,11 @@ use derive_builder::Builder;
 use mediasan_common::parse::FourCC;
 use mediasan_common::Skip;
 use mediasan_common_test::init_logger;
+use webpsan_test::{libwebp_assert_invalid, libwebp_assert_valid};
 
 use crate::parse::chunk_type::{ALPH, ANIM, ANMF, EXIF, ICCP, RIFF, VP8, VP8L, VP8X, XMP};
 use crate::parse::{AlphFlags, Vp8xFlags, WebpChunk};
-use crate::{sanitize_with_config, Config};
+use crate::{sanitize_with_config, Config, Error};
 
 use super::{
     write_test_alph, write_test_anim, write_test_anmf, write_test_chunk, write_test_exif, write_test_iccp,
@@ -230,12 +231,41 @@ impl TestWebpSpec {
 }
 
 impl TestWebp {
+    /// Sanitize a spec-compliant file, asserting the sanitizer accepts it.
     pub fn sanitize_ok(&self) {
         self.sanitize_ok_with_config(Config::default())
     }
 
+    /// Sanitize a spec-compliant file, with a [`Config`], asserting the sanitizer accepts it.
     pub fn sanitize_ok_with_config(&self, config: Config) {
         sanitize_with_config(self.clone(), config).unwrap();
+        libwebp_assert_valid(&self.data)
+    }
+
+    /// Sanitize an invalid file that no parser should accept, asserting the sanitizer rejects it.
+    pub fn sanitize_invalid(&self) -> Error {
+        self.sanitize_invalid_with_config(Config::default())
+    }
+
+    /// Sanitize an invalid file that no parser should accept, with a [`Config`], asserting the sanitizer rejects it.
+    pub fn sanitize_invalid_with_config(&self, config: Config) -> Error {
+        let err = sanitize_with_config(self.clone(), config).unwrap_err();
+        log::info!("sanitizer rejected invalid file: {err}\n{err:?}");
+        libwebp_assert_invalid(&self.data);
+        err
+    }
+
+    /// Sanitize a spec-non-compliant file that some parsers may still accept, asserting the sanitizer rejects it.
+    pub fn sanitize_non_compliant(&self) -> Error {
+        self.sanitize_non_compliant_with_config(Config::default())
+    }
+
+    /// Sanitize a spec-non-compliant file that some parsers may still accept, with a [`Config`], asserting the
+    /// sanitizer rejects it.
+    pub fn sanitize_non_compliant_with_config(&self, config: Config) -> Error {
+        let err = sanitize_with_config(self.clone(), config).unwrap_err();
+        log::info!("sanitizer rejected non-compliant file: {err}\n{err:?}");
+        err
     }
 }
 

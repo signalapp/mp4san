@@ -60,13 +60,16 @@ jobs:
           wget https://download.tsi.telecom-paristech.fr/gpac/release/2.2/libgpac-dev_2.2-rev0-gab012bbf-master_amd64.deb
           sudo apt-get install ./libgpac-dev_2.2-rev0-gab012bbf-master_amd64.deb
 
+      - name: install libwebp for libwebp tests
+        run:  sudo apt-get install --no-install-recommends -y libwebp7 libwebpdemux2 libwebpmux3
+
       - name: cargo test -- --skip test_data
-        run:  cargo test --verbose --features mp4san-test/ffmpeg,mp4san-test/gpac -- --skip test_data
+        run:  cargo test --verbose --features mp4san-test/ffmpeg,mp4san-test/gpac,webpsan-test/libwebp -- --skip test_data
 
       - name: cargo test test_data
         continue-on-error: true
         if: ${{ env.TEST_DATA_SSH_KEY != '' }}
-        run:  cargo test --verbose --features mp4san-test/ffmpeg,mp4san-test/gpac test_data -- --show-output
+        run:  cargo test --verbose --features mp4san-test/ffmpeg,mp4san-test/gpac,webpsan-test/libwebp test_data -- --show-output
 
       - name: cargo clippy
         uses: actions-rs/clippy-check@v1

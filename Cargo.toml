@@ -1,5 +1,5 @@
 [workspace]
-members = ["cli", "common", "mp4san", "mp4san-derive", "mp4san-test", "mp4san-test-gen", "webpsan"]
+members = ["cli", "common", "mp4san", "mp4san-derive", "mp4san-test", "mp4san-test-gen", "webpsan", "webpsan-test"]
 resolver = "2"
 
 [workspace.package]

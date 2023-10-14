@@ -431,7 +431,7 @@ mod test {
     pub fn not_riff() {
         let header = test_header().chunk_type(TEST).clone();
         let test = test_webp().header(Some(header)).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_invalid(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
         });
     }
@@ -440,7 +440,7 @@ mod test {
     pub fn not_webp() {
         let header = test_header().name(TEST).clone();
         let test = test_webp().header(Some(header)).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_invalid(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::InvalidInput, "{err:?}");
         });
     }
@@ -449,7 +449,7 @@ mod test {
     pub fn file_len_zero() {
         let header = test_header().len(Some(0)).clone();
         let test = test_webp().header(Some(header)).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_invalid(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::TruncatedChunk, "{err:?}");
         });
     }
@@ -458,7 +458,7 @@ mod test {
     pub fn file_len_one() {
         let header = test_header().len(Some(1)).clone();
         let test = test_webp().header(Some(header)).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_invalid(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::TruncatedChunk, "{err:?}");
         });
     }
@@ -467,7 +467,7 @@ mod test {
     pub fn file_len_invalid() {
         let header = test_header().len(Some(MAX_FILE_LEN + 1)).clone();
         let test = test_webp().header(Some(header)).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_invalid(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::InvalidInput, "{err:?}");
         });
     }
@@ -478,7 +478,7 @@ mod test {
         test.sanitize_ok();
         test.data = [&test.data[..], b"extra data"].concat().into();
         test.data_len = test.data.len() as u64;
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_non_compliant(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::InvalidInput, "{err:?}");
         });
     }
@@ -486,7 +486,7 @@ mod test {
     #[test]
     pub fn image_data_missing() {
         let test = test_webp().chunks([]).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_invalid(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
         });
     }
@@ -526,7 +526,7 @@ mod test {
     #[test]
     pub fn vp8x_lossless_alpha() {
         let test = test_webp().chunks([VP8X, ALPH, VP8L]).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_invalid(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
         });
     }
@@ -539,7 +539,7 @@ mod test {
     #[test]
     pub fn vp8x_animated_empty() {
         let test = test_webp().chunks([VP8X, ANIM]).anmfs([]).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_invalid(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::MissingRequiredChunk(ANMF), "{err:?}");
         });
     }
@@ -572,7 +572,7 @@ mod test {
         let anmf = test_anmf().chunks([ALPH, VP8L]).clone();
         let anmfs = [anmf.clone(), anmf];
         let test = test_webp().chunks([VP8X, ANIM, ANMF, ANMF]).anmfs(anmfs).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_invalid(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
         });
     }
@@ -617,7 +617,7 @@ mod test {
     pub fn vp8x_animated_alph_wrong_order() {
         let anmfs = [test_anmf().chunks([VP8L, ALPH]).clone()];
         let test = test_webp().chunks([VP8X, ANIM, ANMF]).anmfs(anmfs).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_invalid(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
         });
     }
@@ -627,7 +627,7 @@ mod test {
         let vp8x = test_vp8x().flags(Some(Vp8xFlags::IS_ANIMATED)).clone();
         let anmfs = [test_anmf().chunks([ALPH, VP8L]).clone()];
         let test = test_webp().chunks([VP8X, ANIM, ANMF]).vp8x(vp8x).anmfs(anmfs).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_invalid(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
         });
     }
@@ -635,7 +635,7 @@ mod test {
     #[test]
     pub fn vp8x_image_data_missing() {
         let test = test_webp().chunks([VP8X]).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_invalid(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::MissingRequiredChunk(VP8), "{err:?}");
         });
     }
@@ -644,7 +644,7 @@ mod test {
     pub fn vp8x_unexpected_alph() {
         let vp8x = test_vp8x().flags(Some(Vp8xFlags::empty())).clone();
         let test = test_webp().chunks([VP8X, ALPH, VP8L]).vp8x(vp8x).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_invalid(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
         });
     }
@@ -653,7 +653,7 @@ mod test {
     pub fn vp8x_unexpected_anim() {
         let vp8x = test_vp8x().flags(Some(Vp8xFlags::empty())).clone();
         let test = test_webp().chunks([VP8X, ANIM, ANMF]).vp8x(vp8x).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_invalid(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
         });
     }
@@ -662,7 +662,7 @@ mod test {
     pub fn vp8x_unexpected_anmf() {
         let vp8x = test_vp8x().flags(Some(Vp8xFlags::empty())).clone();
         let test = test_webp().chunks([VP8X, ANMF]).vp8x(vp8x).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_invalid(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
         });
     }
@@ -671,7 +671,7 @@ mod test {
     pub fn vp8x_alph_missing() {
         let vp8x = test_vp8x().flags(Some(Vp8xFlags::HAS_ALPH_CHUNK)).clone();
         let test = test_webp().chunks([VP8X, VP8L]).vp8x(vp8x).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_non_compliant(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
         });
     }
@@ -680,7 +680,7 @@ mod test {
     pub fn vp8x_anim_missing() {
         let vp8x = test_vp8x().flags(Some(Vp8xFlags::IS_ANIMATED)).clone();
         let test = test_webp().chunks([VP8X, ANMF]).vp8x(vp8x).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_invalid(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
         });
     }
@@ -689,7 +689,7 @@ mod test {
     pub fn vp8x_anim_anmf_missing() {
         let vp8x = test_vp8x().flags(Some(Vp8xFlags::IS_ANIMATED)).clone();
         let test = test_webp().chunks([VP8X]).vp8x(vp8x).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_invalid(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::MissingRequiredChunk(ANIM), "{err:?}");
         });
     }
@@ -718,7 +718,7 @@ mod test {
     #[test]
     pub fn vp8x_wrong_order() {
         let test = test_webp().chunks([VP8L, VP8X]).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_non_compliant(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
         });
     }
@@ -726,7 +726,7 @@ mod test {
     #[test]
     pub fn vp8x_alph_wrong_order() {
         let test = test_webp().chunks([VP8X, VP8L, ALPH]).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_non_compliant(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
         });
     }
@@ -734,7 +734,7 @@ mod test {
     #[test]
     pub fn vp8x_iccp_wrong_order() {
         let test = test_webp().chunks([VP8X, VP8L, ICCP]).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_non_compliant(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
         });
     }
@@ -742,11 +742,11 @@ mod test {
     #[test]
     pub fn vp8x_exif_wrong_order() {
         let test = test_webp().chunks([VP8X, EXIF, VP8L]).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_non_compliant(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
         });
         let test = test_webp().chunks([VP8X, VP8L, XMP, EXIF]).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_non_compliant(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
         });
     }
@@ -754,7 +754,7 @@ mod test {
     #[test]
     pub fn vp8x_xmp_wrong_order() {
         let test = test_webp().chunks([VP8X, XMP, VP8L]).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_non_compliant(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
         });
     }
@@ -763,7 +763,7 @@ mod test {
     pub fn vp8x_iccp_missing() {
         let vp8x = test_vp8x().flags(Some(Vp8xFlags::HAS_ICCP_CHUNK)).clone();
         let test = test_webp().chunks([VP8X, VP8L]).vp8x(vp8x).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_non_compliant(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
         });
     }
@@ -772,7 +772,7 @@ mod test {
     pub fn vp8x_exif_missing() {
         let vp8x = test_vp8x().flags(Some(Vp8xFlags::HAS_EXIF_CHUNK)).clone();
         let test = test_webp().chunks([VP8X, VP8L]).vp8x(vp8x).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_non_compliant(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::MissingRequiredChunk(EXIF), "{err:?}");
         });
     }
@@ -781,7 +781,7 @@ mod test {
     pub fn vp8x_xmp_missing() {
         let vp8x = test_vp8x().flags(Some(Vp8xFlags::HAS_XMP_CHUNK)).clone();
         let test = test_webp().chunks([VP8X, VP8L]).vp8x(vp8x).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_non_compliant(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::MissingRequiredChunk(XMP), "{err:?}");
         });
     }
@@ -790,7 +790,7 @@ mod test {
     pub fn vp8x_iccp_unexpected() {
         let vp8x = test_vp8x().flags(Some(Vp8xFlags::empty())).clone();
         let test = test_webp().chunks([VP8X, ICCP, VP8L]).vp8x(vp8x).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_non_compliant(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
         });
     }
@@ -799,7 +799,7 @@ mod test {
     pub fn vp8x_exif_unexpected() {
         let vp8x = test_vp8x().flags(Some(Vp8xFlags::empty())).clone();
         let test = test_webp().chunks([VP8X, VP8L, EXIF]).vp8x(vp8x).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_non_compliant(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
         });
     }
@@ -808,7 +808,7 @@ mod test {
     pub fn vp8x_xmp_unexpected() {
         let vp8x = test_vp8x().flags(Some(Vp8xFlags::empty())).clone();
         let test = test_webp().chunks([VP8X, VP8L, XMP]).vp8x(vp8x).build();
-        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+        assert_matches!(test.sanitize_non_compliant(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
         });
     }
