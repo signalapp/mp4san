@@ -246,12 +246,14 @@ async fn sanitize_still<R: AsyncRead + AsyncSkip>(
     reader: &mut Pin<&mut ChunkReader<R>>,
     vp8x: &Vp8xChunk,
 ) -> Result<(), Error> {
+    let mut alph = None;
     if vp8x.flags.contains(Vp8xFlags::HAS_ALPH_CHUNK) {
         let InputSpan { offset, len } = reader.read_header(ALPH).await?;
-        let alph @ AlphChunk { flags } = reader.parse_data().await?;
-        alph.sanitize_image_data(reader.data_reader(), vp8x).await?;
+        let read_alph @ AlphChunk { flags } = reader.parse_data().await?;
+        read_alph.sanitize_image_data(reader.data_reader(), vp8x).await?;
         reader.skip_data().await?;
         log::info!("{name} @ 0x{offset:08x}: {len} bytes, flags {flags:08b}", name = ALPH);
+        alph = Some(read_alph);
     }
 
     ensure_attach!(reader.has_remaining().await?, ParseError::MissingRequiredChunk(VP8));
@@ -262,6 +264,8 @@ async fn sanitize_still<R: AsyncRead + AsyncSkip>(
             log::info!("{name} @ 0x{offset:08x}: {len} bytes");
         }
         VP8L => {
+            ensure_matches_attach!(alph, None, ParseError::InvalidChunkLayout, WhileParsingChunk(VP8L));
+
             let vp8l @ Vp8lChunk { .. } = reader.parse_data().await?;
             let (width, height) = (vp8l.width(), vp8l.height());
             ensure_attach!(
@@ -310,12 +314,15 @@ async fn sanitize_animated<R: AsyncRead + AsyncSkip>(
         let mut anmf_reader = reader.child_reader();
         let mut anmf_reader = Pin::new(&mut anmf_reader);
 
+        let mut alph = None;
         if vp8x.flags.contains(Vp8xFlags::HAS_ALPH_CHUNK) {
             if let Some(ALPH) = anmf_reader.peek_header().await? {
                 let InputSpan { offset, len } = anmf_reader.read_header(ALPH).await?;
-                let AlphChunk { flags } = anmf_reader.parse_data().await?;
+                let read_alph @ AlphChunk { flags } = anmf_reader.parse_data().await?;
+                read_alph.sanitize_image_data(anmf_reader.data_reader(), vp8x).await?;
                 anmf_reader.skip_data().await?;
                 log::info!("{name} @ 0x{offset:08x}: {len} bytes, flags {flags:08b}", name = ALPH);
+                alph = Some(read_alph);
             }
         }
 
@@ -329,6 +336,8 @@ async fn sanitize_animated<R: AsyncRead + AsyncSkip>(
                 log::info!("{name} @ 0x{offset:08x}: {len} bytes");
             }
             VP8L => {
+                ensure_matches_attach!(alph, None, ParseError::InvalidChunkLayout, WhileParsingChunk(VP8L));
+
                 let vp8l @ Vp8lChunk { .. } = anmf_reader.parse_data().await?;
                 let (width, height) = (vp8l.width(), vp8l.height());
                 ensure_attach!(
@@ -515,15 +524,11 @@ mod test {
     }
 
     #[test]
-    pub fn vp8x_lossless_alpha_lossless() {
-        let alph = test_alph().flags(AlphFlags::COMPRESS_LOSSLESS).clone();
-        test_webp().chunks([VP8X, ALPH, VP8L]).alph(alph).build().sanitize_ok();
-    }
-
-    #[test]
-    pub fn vp8x_lossless_alpha_uncompressed() {
-        let alph = test_alph().flags(AlphFlags::empty()).clone();
-        test_webp().chunks([VP8X, ALPH, VP8L]).alph(alph).build().sanitize_ok();
+    pub fn vp8x_lossless_alpha() {
+        let test = test_webp().chunks([VP8X, ALPH, VP8L]).build();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
+        });
     }
 
     #[test]
@@ -567,7 +572,9 @@ mod test {
         let anmf = test_anmf().chunks([ALPH, VP8L]).clone();
         let anmfs = [anmf.clone(), anmf];
         let test = test_webp().chunks([VP8X, ANIM, ANMF, ANMF]).anmfs(anmfs).build();
-        test.sanitize_ok();
+        assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
+        });
     }
 
     #[test]
@@ -580,8 +587,8 @@ mod test {
 
     #[test]
     pub fn vp8x_animated_alpha_no_alpha() {
-        let anmf_no_alpha = test_anmf().chunks([VP8L]).clone();
-        let alpha_anmf = test_anmf().chunks([ALPH, VP8L]).clone();
+        let anmf_no_alpha = test_anmf().chunks([VP8]).clone();
+        let alpha_anmf = test_anmf().chunks([ALPH, VP8]).clone();
         let anmfs = [alpha_anmf, anmf_no_alpha];
         let test = test_webp().chunks([VP8X, ANIM, ANMF, ANMF]).anmfs(anmfs).build();
         test.sanitize_ok();
@@ -589,8 +596,8 @@ mod test {
 
     #[test]
     pub fn vp8x_animated_no_alpha_alpha() {
-        let anmf_no_alpha = test_anmf().chunks([VP8L]).clone();
-        let alpha_anmf = test_anmf().chunks([ALPH, VP8L]).clone();
+        let anmf_no_alpha = test_anmf().chunks([VP8]).clone();
+        let alpha_anmf = test_anmf().chunks([ALPH, VP8]).clone();
         let anmfs = [anmf_no_alpha, alpha_anmf];
         let test = test_webp().chunks([VP8X, ANIM, ANMF, ANMF]).anmfs(anmfs).build();
         test.sanitize_ok();
