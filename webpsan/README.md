@@ -34,6 +34,11 @@ types.
 GitHub is the project's bug tracker. Please [search](https://github.com/privacyresearchgroup/mp4san/issues) for similar
 existing issues before [submitting a new one](https://github.com/privacyresearchgroup/mp4san/issues/new).
 
+## Testing
+
+`libwebp`-based verification of webpsan tests can be enabled using the `webpsan-test/libwebp` feature. `libwebp` is
+linked statically, so does not need to be installed for the tests.
+
 ### Fuzz Testing
 
 Fuzz testing via both `cargo afl` and `cargo fuzz` is supported. See [the Rust Fuzz Book](https://rust-fuzz.github.io/book/) for more details. To run AFL-based fuzzing:
