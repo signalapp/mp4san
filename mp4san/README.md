@@ -71,6 +71,13 @@ The `mp4san-test/ffmpeg` feature requires the following FFMpeg libraries and the
 
 The `mp4san-test/gpac` feature requires `libgpac >= 2.2` and its headers to be installed.
 
+The [`test_data`](tests/test-data.rs) integration test runs on sample data files in the private
+[`test-data`](../test-data) submodule. If you have access to this repo, you may check out the submodule manually:
+
+```shell
+$ git submodule update --init --checkout
+```
+
 Integration tests on sample data files can be processed through `mp4san-test-gen` before being added to the
 `mp4san-test-data` repo. This removes any actual media data from the sample file, since it's not read by `mp4san`
 anyway, leaving only metadata for testing purposes. This allows even very large media files to be gzipped to very small

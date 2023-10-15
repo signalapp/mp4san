@@ -39,6 +39,13 @@ existing issues before [submitting a new one](https://github.com/privacyresearch
 `libwebp`-based verification of webpsan tests can be enabled using the `webpsan-test/libwebp` feature. `libwebp` is
 linked statically, so does not need to be installed for the tests.
 
+The [`test_data`](tests/test-data.rs) integration test runs on sample data files in the private
+[`test-data`](../test-data) submodule. If you have access to this repo, you may check out the submodule manually:
+
+```shell
+$ git submodule update --init --checkout
+```
+
 ### Fuzz Testing
 
 Fuzz testing via both `cargo afl` and `cargo fuzz` is supported. See [the Rust Fuzz Book](https://rust-fuzz.github.io/book/) for more details. To run AFL-based fuzzing:

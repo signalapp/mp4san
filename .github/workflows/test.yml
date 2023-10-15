@@ -32,7 +32,7 @@ jobs:
         run: |
           eval `ssh-agent`
           ssh-add - <<< "${SSH_KEY}"
-          git submodule update --init test-data
+          git submodule update --init --checkout test-data
 
       - name: cache cargo output
         uses: actions/cache@v3

@@ -1,3 +1,4 @@
 [submodule "test-data"]
 	path = test-data
 	url = git@github.com:privacyresearchgroup/mp4san-test-data.git
+        update = none
