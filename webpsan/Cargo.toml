@@ -23,7 +23,7 @@ derive_builder = "0.12.0"
 derive_more = "0.99.17"
 futures-util = { version = "0.3.28", default-features = false, features = ["io"] }
 log = "0.4.17"
-mediasan-common = { path = "../common", version = "=0.3.2" }
+mediasan-common = { path = "../common", version = "=0.4.0" }
 num-integer = { version = "0.1.45", default-features = false }
 num-traits = { version = "0.2.16", default-features = false }
 pin-project = "1.1.3"
