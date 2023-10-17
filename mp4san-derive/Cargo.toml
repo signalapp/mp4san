@@ -1,5 +1,6 @@
 [package]
-name = "mp4san_derive"
+name = "mp4san-derive"
+description = "Derive macros for the mp4san crate."
 version.workspace = true
 edition.workspace = true
 
@@ -10,7 +11,7 @@ license.workspace = true
 categories = ["multimedia::video"]
 keywords = ["mp4", "sanitizer", "video", "media"]
 
-readme = "/mp4san/README.md"
+readme = "../mp4san/README.md"
 exclude.workspace = true
 
 [lib]
