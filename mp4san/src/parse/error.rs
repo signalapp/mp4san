@@ -3,6 +3,7 @@
 use std::fmt::{Debug, Display};
 
 use derive_more::Display;
+use mediasan_common::error::{ReportStack, ReportableError};
 
 use crate::error::{Result, ResultExt};
 
@@ -95,4 +96,8 @@ pub(crate) struct WhileParsingChild(pub(crate) BoxType, pub(crate) BoxType);
 #[display(fmt = "where `{} = {}`", _0, _1)]
 pub(crate) struct WhereEq<T, U>(pub(crate) T, pub(crate) U);
 
-impl<T, E> ParseResultExt for Result<T, E> {}
+impl ReportableError for ParseError {
+    type Stack = ReportStack;
+}
+
+impl<T> ParseResultExt for Result<T, ParseError> {}

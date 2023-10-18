@@ -3,6 +3,7 @@
 use std::fmt::{Debug, Display};
 
 use derive_more::Display;
+use mediasan_common::error::ReportableError;
 use mediasan_common::parse::FourCC;
 use mediasan_common::{Result, ResultExt};
 
@@ -72,4 +73,11 @@ pub(crate) struct WhileParsingChunk(pub(crate) FourCC);
 #[display(fmt = "while parsing `{}` chunk field `{}`", _0, _1)]
 pub(crate) struct WhileParsingField<T>(pub(crate) FourCC, pub(crate) T);
 
-impl<T, E> ParseResultExt for Result<T, E> {}
+impl ReportableError for ParseError {
+    #[cfg(feature = "error-detail")]
+    type Stack = mediasan_common::error::ReportStack;
+    #[cfg(not(feature = "error-detail"))]
+    type Stack = mediasan_common::error::NullReportStack;
+}
+
+impl<T> ParseResultExt for Result<T, ParseError> {}

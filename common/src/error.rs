@@ -15,7 +15,7 @@ use derive_more::Display;
 
 /// Error type returned by `mediasan`.
 #[derive(Debug, thiserror::Error)]
-pub enum Error<E: Display> {
+pub enum Error<E: ReportableError> {
     /// An IO error occurred while reading the given input.
     #[error("IO error: {0}")]
     Io(#[from] io::Error),
@@ -32,10 +32,10 @@ pub enum Error<E: Display> {
 /// retrieved e.g. for matching against with [`get_ref`](Self::get_ref) or [`into_inner`](Self::into_inner).
 #[derive(thiserror::Error)]
 #[error("{error}")]
-pub struct Report<E> {
+pub struct Report<E: ReportableError> {
     #[source]
     error: E,
-    inner: Box<ReportInner>,
+    stack: E::Stack,
 }
 
 /// A [`Display`]-able indicating there was extra trailing input after parsing.
@@ -47,10 +47,6 @@ pub struct ExtraUnparsedInput;
 #[derive(Clone, Copy, Debug, Display)]
 #[display(fmt = "while parsing value of type `{}`", _0)]
 pub struct WhileParsingType(&'static str);
-
-//
-// private types
-//
 
 /// A convenience type alias for a [`Result`](std::result::Result) containing an error wrapped by a [`Report`].
 pub type Result<T, E> = StdResult<T, Report<E>>;
@@ -66,15 +62,37 @@ pub trait ResultExt: Sized {
     fn while_parsing_type(self) -> Self;
 }
 
-struct ReportInner {
+/// An error stack.
+pub struct ReportStack {
     location: &'static Location<'static>,
-    stack: ReportStack,
-}
-
-#[derive(Default)]
-struct ReportStack {
     entries: Vec<ReportEntry>,
 }
+
+/// A null error stack which ignores all data attached to it.
+#[derive(Clone, Copy, Debug, Display)]
+#[display(fmt = "")]
+pub struct NullReportStack;
+
+/// A trait for error types which can be used in a [`Report`].
+pub trait ReportableError: Display {
+    /// The error stack type corresponding to this error.
+    type Stack: ReportableErrorStack;
+}
+
+/// A trait for error stack types for use within a [`Report`].
+pub trait ReportableErrorStack: Display {
+    #[track_caller]
+    /// Construct a new instance of [`Self`].
+    fn new() -> Self;
+
+    #[track_caller]
+    /// Attach a [`Display`]-able type to the error [`Report`]'s stack trace.
+    fn attach_printable<P: Display + Send + Sync + 'static>(self, printable: P) -> Self;
+}
+
+//
+// private types
+//
 
 #[derive(derive_more::Display)]
 #[display(fmt = "{message} at {location}")]
@@ -87,7 +105,7 @@ struct ReportEntry {
 // Report impls
 //
 
-impl<E> Report<E> {
+impl<E: ReportableError> Report<E> {
     /// Get a reference to the underlying error.
     pub fn get_ref(&self) -> &E {
         &self.error
@@ -101,26 +119,28 @@ impl<E> Report<E> {
     #[track_caller]
     /// Attach a [`Display`]-able type to the stack trace.
     pub fn attach_printable<P: Display + Send + Sync + 'static>(mut self, message: P) -> Self {
-        let entry = ReportEntry { message: Box::new(message), location: Location::caller() };
-        self.inner.stack.entries.push(entry);
+        self.stack = self.stack.attach_printable(message);
         self
     }
 }
 
-impl<E> From<E> for Report<E> {
+impl<E: ReportableError> From<E> for Report<E> {
     #[track_caller]
     fn from(error: E) -> Self {
-        Self { error, inner: Box::new(ReportInner { location: Location::caller(), stack: Default::default() }) }
+        Self { error, stack: E::Stack::new() }
     }
 }
 
-impl<E: Display> Debug for Report<E> {
+impl<E: ReportableError> Debug for Report<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { error, inner } = self;
-        let ReportInner { location, stack } = &**inner;
-        write!(f, "{error} at {location}\n{stack}")
+        let Self { error, stack } = self;
+        write!(f, "{error}{stack}")
     }
 }
+
+//
+// ReportErrorStack impls
+//
 
 //
 // WhileParsingType impls
@@ -139,13 +159,42 @@ impl WhileParsingType {
 
 impl Display for ReportStack {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for entry in &self.entries[..self.entries.len().saturating_sub(1)] {
+        let Self { location, entries } = self;
+        writeln!(f, " at {location}")?;
+        for entry in &entries[..self.entries.len().saturating_sub(1)] {
             writeln!(f, " - {entry}")?;
         }
-        if let Some(entry) = self.entries.last() {
+        if let Some(entry) = entries.last() {
             write!(f, " - {entry}")?;
         }
         Ok(())
+    }
+}
+
+impl ReportableErrorStack for ReportStack {
+    #[track_caller]
+    fn new() -> Self {
+        Self { location: Location::caller(), entries: Default::default() }
+    }
+
+    fn attach_printable<P: Display + Send + Sync + 'static>(mut self, printable: P) -> Self {
+        let entry = ReportEntry { message: Box::new(printable), location: Location::caller() };
+        self.entries.push(entry);
+        self
+    }
+}
+
+//
+// ReportableErrorStack impls
+//
+
+impl ReportableErrorStack for NullReportStack {
+    fn new() -> Self {
+        Self
+    }
+
+    fn attach_printable<P: Display + Send + Sync + 'static>(self, _printable: P) -> Self {
+        Self
     }
 }
 
@@ -153,7 +202,7 @@ impl Display for ReportStack {
 // ResultExt impls
 //
 
-impl<T, E> ResultExt for Result<T, E> {
+impl<T, E: ReportableError> ResultExt for Result<T, E> {
     #[track_caller]
     fn attach_printable<P: Display + Send + Sync + 'static>(self, printable: P) -> Self {
         match self {
@@ -168,7 +217,7 @@ impl<T, E> ResultExt for Result<T, E> {
     }
 }
 
-impl<T, E: Display> ResultExt for StdResult<T, Error<E>> {
+impl<T, E: ReportableError> ResultExt for StdResult<T, Error<E>> {
     #[track_caller]
     fn attach_printable<P: Display + Send + Sync + 'static>(self, printable: P) -> Self {
         match self {
@@ -194,6 +243,10 @@ mod test {
     #[derive(Debug, thiserror::Error)]
     #[error("{}", TEST_ERROR_DISPLAY)]
     struct TestError;
+
+    impl ReportableError for TestError {
+        type Stack = ReportStack;
+    }
 
     fn test_report() -> Report<TestError> {
         report_attach!(TestError, TEST_ATTACHMENT)
