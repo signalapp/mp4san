@@ -7,9 +7,9 @@ parser can be avoided.
 
 ## Usage
 
-The main entry points to the sanitizer are [`sanitize`]/[`sanitize_async`], which take a [`Read`] + [`Skip`] input. The
-[`Skip`] trait represents a subset of the [`Seek`] trait; an input stream which can be skipped forward, but not
-necessarily seeked to arbitrary positions.
+The main entry points to the sanitizer are [`sanitize`], which take a [`Read`] + [`Skip`] input. The [`Skip`] trait
+represents a subset of the [`Seek`] trait; an input stream which can be skipped forward, but not necessarily seeked to
+arbitrary positions.
 
 ```rust
 let example_input = b"RIFF\x14\0\0\0WEBPVP8L\x08\0\0\0\x2f\0\0\0\0\x88\x88\x08";
@@ -23,7 +23,6 @@ types.
 [Private Documentation](https://privacyresearchgroup.github.io/mp4san/private/webpsan/)  
 
 [`sanitize`]: https://privacyresearchgroup.github.io/mp4san/public/webpsan/fn.sanitize.html
-[`sanitize_async`]: https://privacyresearchgroup.github.io/mp4san/public/webpsan/fn.sanitize_async.html
 [`Read`]: https://doc.rust-lang.org/std/io/trait.Read.html
 [`Skip`]: https://privacyresearchgroup.github.io/mp4san/public/mediasan_common/trait.Skip.html
 [`Seek`]: https://doc.rust-lang.org/std/io/trait.Seek.html

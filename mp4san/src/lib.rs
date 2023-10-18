@@ -65,9 +65,11 @@ use derive_builder::Builder;
 use derive_more::Display;
 use futures_util::io::BufReader;
 use futures_util::{pin_mut, AsyncBufReadExt, AsyncRead};
+use mediasan_common::async_skip::{
+    buf_skip as skip, buf_stream_len as stream_len, buf_stream_position as stream_position,
+};
 use mediasan_common::sync;
 use mediasan_common::util::{checked_add_signed, IoResultExt};
-use mediasan_common::{buf_skip as skip, buf_stream_len as stream_len, buf_stream_position as stream_position};
 
 use crate::error::Report;
 use crate::parse::error::{MultipleBoxes, WhileParsingBox};

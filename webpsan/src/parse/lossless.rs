@@ -1,11 +1,11 @@
 #![allow(missing_docs)]
 
 use std::fmt::Debug;
+use std::io::Read;
 use std::num::{NonZeroU32, NonZeroU8};
 
 use bitstream_io::{Numeric, LE};
 use derive_more::Display;
-use futures_util::AsyncRead;
 use mediasan_common::{ensure_attach, ensure_matches_attach};
 use num_integer::div_ceil;
 use num_traits::AsPrimitive;
@@ -164,17 +164,15 @@ struct WhileParsingTransform(TransformType);
 //
 
 impl LosslessImage {
-    pub async fn read<R: AsyncRead + Unpin>(
+    pub fn read<R: Read>(
         reader: &mut BitBufReader<R, LE>,
         width: NonZeroU32,
         height: NonZeroU32,
     ) -> Result<Self, Error> {
         let mut transformed_width = width;
         let mut transforms = [false; TransformType::COUNT];
-        while reader.read_bit().await? {
-            let transform = Transform::read(reader, transformed_width, height)
-                .await
-                .while_parsing_type()?;
+        while reader.read_bit()? {
+            let transform = Transform::read(reader, transformed_width, height).while_parsing_type()?;
 
             transformed_width = transform.transformed_width(transformed_width);
 
@@ -188,9 +186,7 @@ impl LosslessImage {
             log::info!("{transform}");
         }
 
-        let _image = SpatiallyCodedImage::read(reader, transformed_width, height)
-            .await
-            .while_parsing_type()?;
+        let _image = SpatiallyCodedImage::read(reader, transformed_width, height).while_parsing_type()?;
 
         Ok(Self { _image })
     }
@@ -201,16 +197,11 @@ impl LosslessImage {
 //
 
 impl Transform {
-    async fn read<R: AsyncRead + Unpin>(
-        reader: &mut BitBufReader<R, LE>,
-        width: NonZeroU32,
-        height: NonZeroU32,
-    ) -> Result<Self, Error> {
-        match TransformType::read(reader).await? {
+    fn read<R: Read>(reader: &mut BitBufReader<R, LE>, width: NonZeroU32, height: NonZeroU32) -> Result<Self, Error> {
+        match TransformType::read(reader)? {
             transform @ TransformType::Predictor => {
                 let block_order = 2 + reader
                     .read::<u32>(3)
-                    .await
                     .attach_printable(WhileParsingTransform(transform))?;
                 let block_size = 2u16.pow(block_order);
                 let width_in_blocks = len_in_blocks(width, block_size);
@@ -224,7 +215,6 @@ impl Transform {
                     );
                     Ok(())
                 })
-                .await
                 .while_parsing_type()
                 .attach_printable(WhileParsingTransform(transform))?;
                 Ok(Self::Predictor { block_size, _image })
@@ -232,26 +222,20 @@ impl Transform {
             transform @ TransformType::Color => {
                 let block_order = 2 + reader
                     .read::<u32>(3)
-                    .await
                     .attach_printable(WhileParsingTransform(transform))?;
                 let block_size = 2u16.pow(block_order);
                 let width_in_blocks = len_in_blocks(width, block_size);
                 let height_in_blocks = len_in_blocks(height, block_size);
                 let _image = EntropyCodedImage::read(reader, width_in_blocks, height_in_blocks, |_| Ok(()))
-                    .await
                     .while_parsing_type()
                     .attach_printable(WhileParsingTransform(transform))?;
                 Ok(Self::Color { block_size, _image })
             }
             TransformType::SubtractGreen => Ok(Self::SubtractGreen),
             transform @ TransformType::ColorIndexing => {
-                let len_minus_one = reader
-                    .read(8)
-                    .await
-                    .attach_printable(WhileParsingTransform(transform))?;
+                let len_minus_one = reader.read(8).attach_printable(WhileParsingTransform(transform))?;
                 let len = NonZeroU32::MIN.saturating_add(len_minus_one);
                 let image = EntropyCodedImage::read(reader, len, NonZeroU32::MIN, |_| Ok(()))
-                    .await
                     .while_parsing_type()
                     .attach_printable(WhileParsingTransform(transform))?;
                 Ok(Self::ColorIndexing { image })
@@ -292,8 +276,8 @@ impl TransformType {
 
     const COUNT: usize = 4;
 
-    async fn read<R: AsyncRead + Unpin>(reader: &mut BitBufReader<R, LE>) -> Result<Self, Error> {
-        match reader.read(2).await? {
+    fn read<R: Read>(reader: &mut BitBufReader<R, LE>) -> Result<Self, Error> {
+        match reader.read(2)? {
             Self::PREDICTOR => Ok(Self::Predictor),
             Self::COLOR => Ok(Self::Color),
             Self::SUBTRACT_GREEN => Ok(Self::SubtractGreen),
@@ -308,14 +292,14 @@ impl TransformType {
 //
 
 impl EntropyCodedImage {
-    async fn read<R: AsyncRead + Unpin, F: FnMut(Color) -> Result<(), Error>>(
+    fn read<R: Read, F: FnMut(Color) -> Result<(), Error>>(
         reader: &mut BitBufReader<R, LE>,
         width: NonZeroU32,
         height: NonZeroU32,
         mut fun: F,
     ) -> Result<Self, Error> {
-        let color_cache = ColorCache::read(reader).await.while_parsing_type()?;
-        let codes = PrefixCodeGroup::read(reader, &color_cache).await.while_parsing_type()?;
+        let color_cache = ColorCache::read(reader).while_parsing_type()?;
+        let codes = PrefixCodeGroup::read(reader, &color_cache).while_parsing_type()?;
         let argb_readahead_bits = codes.argb_readahead_bits();
         let readahead_bits = codes.readahead_bits();
 
@@ -323,7 +307,7 @@ impl EntropyCodedImage {
         let mut pixel_idx = 0;
         while pixel_idx < len.get() {
             if reader.buf_bits() < u64::from(readahead_bits) {
-                reader.fill_buf().await?;
+                reader.fill_buf()?;
             }
             match reader.buf_read_huffman(&codes.green.tree)? {
                 symbol @ 0..=255 => {
@@ -373,19 +357,13 @@ impl EntropyCodedImage {
 //
 
 impl SpatiallyCodedImage {
-    async fn read<R: AsyncRead + Unpin>(
-        reader: &mut BitBufReader<R, LE>,
-        width: NonZeroU32,
-        height: NonZeroU32,
-    ) -> Result<Self, Error> {
-        let color_cache = ColorCache::read(reader).await.while_parsing_type()?;
-        let meta = MetaPrefixCodes::read(reader, width, height)
-            .await
-            .while_parsing_type()?;
+    fn read<R: Read>(reader: &mut BitBufReader<R, LE>, width: NonZeroU32, height: NonZeroU32) -> Result<Self, Error> {
+        let color_cache = ColorCache::read(reader).while_parsing_type()?;
+        let meta = MetaPrefixCodes::read(reader, width, height).while_parsing_type()?;
         log::info!("{meta}");
 
         for _ in 0..=meta.max_code_group() {
-            let _codes = PrefixCodeGroup::read(reader, &color_cache).await.while_parsing_type()?;
+            let _codes = PrefixCodeGroup::read(reader, &color_cache).while_parsing_type()?;
         }
         Ok(Self)
     }
@@ -419,7 +397,7 @@ impl BackReference {
     ];
     const DISTANCE_MAP_LEN: u32 = Self::DISTANCE_MAP.len() as u32;
 
-    fn buf_read<R: AsyncRead + Unpin>(
+    fn buf_read<R: Read>(
         reader: &mut BitBufReader<R, LE>,
         len_symbol: u16,
         codes: &PrefixCodeGroup,
@@ -452,11 +430,7 @@ impl BackReference {
 //
 
 impl Color {
-    fn buf_read<R: AsyncRead + Unpin>(
-        reader: &mut BitBufReader<R, LE>,
-        green: u8,
-        codes: &PrefixCodeGroup,
-    ) -> Result<Self, Error> {
+    fn buf_read<R: Read>(reader: &mut BitBufReader<R, LE>, green: u8, codes: &PrefixCodeGroup) -> Result<Self, Error> {
         Ok(Self {
             green,
             red: reader.buf_read_huffman(&codes.red.tree)?,
@@ -477,10 +451,10 @@ impl From<Color> for u32 {
 //
 
 impl ColorCache {
-    async fn read<R: AsyncRead + Unpin>(reader: &mut BitBufReader<R, LE>) -> Result<Self, Error> {
-        let has_color_cache = reader.read_bit().await?;
+    fn read<R: Read>(reader: &mut BitBufReader<R, LE>) -> Result<Self, Error> {
+        let has_color_cache = reader.read_bit()?;
         if has_color_cache {
-            let order = reader.read::<u8>(4).await?;
+            let order = reader.read::<u8>(4)?;
             ensure_attach!(order <= 11, ParseError::InvalidInput, InvalidColorCacheSize(order));
             ensure_matches_attach!(
                 NonZeroU8::new(order),
@@ -504,14 +478,10 @@ impl ColorCache {
 //
 
 impl MetaPrefixCodes {
-    async fn read<R: AsyncRead + Unpin>(
-        reader: &mut BitBufReader<R, LE>,
-        width: NonZeroU32,
-        height: NonZeroU32,
-    ) -> Result<Self, Error> {
-        let has_meta = reader.read_bit().await?;
+    fn read<R: Read>(reader: &mut BitBufReader<R, LE>, width: NonZeroU32, height: NonZeroU32) -> Result<Self, Error> {
+        let has_meta = reader.read_bit()?;
         if has_meta {
-            let block_order = 2 + reader.read::<u32>(3).await?;
+            let block_order = 2 + reader.read::<u32>(3)?;
             let block_size = 2u16.pow(block_order);
             let width_in_blocks = len_in_blocks(width, block_size);
             let height_in_blocks = len_in_blocks(height, block_size);
@@ -520,7 +490,6 @@ impl MetaPrefixCodes {
                 max_code_group = max_code_group.max(u16::from(color.red) << 8 | u16::from(color.green));
                 Ok(())
             })
-            .await
             .while_parsing_type()?;
             Ok(Self::Multiple { block_size, max_code_group, _image })
         } else {
@@ -541,19 +510,16 @@ impl MetaPrefixCodes {
 //
 
 impl PrefixCodeGroup {
-    async fn read<R: AsyncRead + Unpin>(
-        reader: &mut BitBufReader<R, LE>,
-        color_cache: &ColorCache,
-    ) -> Result<Self, Error> {
-        let green = Self::read_prefix_code(reader, color_cache).await.while_parsing_type()?;
-        let red = Self::read_prefix_code(reader, color_cache).await.while_parsing_type()?;
-        let blue = Self::read_prefix_code(reader, color_cache).await.while_parsing_type()?;
-        let alpha = Self::read_prefix_code(reader, color_cache).await.while_parsing_type()?;
-        let distance = Self::read_prefix_code(reader, color_cache).await.while_parsing_type()?;
+    fn read<R: Read>(reader: &mut BitBufReader<R, LE>, color_cache: &ColorCache) -> Result<Self, Error> {
+        let green = Self::read_prefix_code(reader, color_cache).while_parsing_type()?;
+        let red = Self::read_prefix_code(reader, color_cache).while_parsing_type()?;
+        let blue = Self::read_prefix_code(reader, color_cache).while_parsing_type()?;
+        let alpha = Self::read_prefix_code(reader, color_cache).while_parsing_type()?;
+        let distance = Self::read_prefix_code(reader, color_cache).while_parsing_type()?;
         Ok(Self { green, red, blue, alpha, distance })
     }
 
-    async fn read_prefix_code<R: AsyncRead + Unpin, T: PrefixCode>(
+    fn read_prefix_code<R: Read, T: PrefixCode>(
         reader: &mut BitBufReader<R, LE>,
         color_cache: &ColorCache,
     ) -> Result<T, Error>
@@ -561,31 +527,31 @@ impl PrefixCodeGroup {
         usize: AsPrimitive<T::Symbol>,
         T::Symbol: Copy + Ord + 'static,
     {
-        let simple_code_length_code = reader.read_bit().await?;
+        let simple_code_length_code = reader.read_bit()?;
         let tree = if simple_code_length_code {
-            let has_second_symbol = reader.read_bit().await?;
+            let has_second_symbol = reader.read_bit()?;
 
-            let is_first_symbol_8bits = reader.read_bit().await?;
+            let is_first_symbol_8bits = reader.read_bit()?;
             let first_symbol = if is_first_symbol_8bits {
-                reader.read(8).await?
+                reader.read(8)?
             } else {
-                Numeric::from_u8(reader.read_bit().await? as u8)
+                Numeric::from_u8(reader.read_bit()? as u8)
             };
             let symbols = if has_second_symbol {
-                let second_symbol = reader.read(8).await?;
+                let second_symbol = reader.read(8)?;
                 vec![(first_symbol, vec![0]), (second_symbol, vec![1])]
             } else {
                 vec![(first_symbol, vec![])]
             };
             CanonicalHuffmanTree::from_symbols(symbols)?
         } else {
-            let code_length_code = CodeLengthPrefixCode::read(reader).await?;
+            let code_length_code = CodeLengthPrefixCode::read(reader)?;
 
             let max_symbol_count = T::alphabet_size(color_cache.len());
-            let max_symbol_reads = if reader.read_bit().await? {
-                let length_bit_len = 2 + 2 * reader.read::<u32>(3).await?;
+            let max_symbol_reads = if reader.read_bit()? {
+                let length_bit_len = 2 + 2 * reader.read::<u32>(3)?;
                 log::debug!("length_bit_len: {length_bit_len:?}");
-                2u16.saturating_add(reader.read(length_bit_len).await?)
+                2u16.saturating_add(reader.read(length_bit_len)?)
             } else {
                 max_symbol_count
             };
@@ -605,12 +571,12 @@ impl PrefixCodeGroup {
                     break;
                 }
 
-                let code_length_code = reader.read_huffman(&code_length_code.tree).await?;
+                let code_length_code = reader.read_huffman(&code_length_code.tree)?;
                 let (code_length, repeat_times) = match code_length_code {
                     0..=15 => (code_length_code, 1),
-                    16 => (last_non_zero_code_length.get(), 3 + reader.read::<u8>(2).await?),
-                    17 => (0, 3 + reader.read::<u8>(3).await?),
-                    18 => (0, 11 + reader.read::<u8>(7).await?),
+                    16 => (last_non_zero_code_length.get(), 3 + reader.read::<u8>(2)?),
+                    17 => (0, 3 + reader.read::<u8>(3)?),
+                    18 => (0, 11 + reader.read::<u8>(7)?),
                     19.. => unreachable!(),
                 };
                 if let Some(non_zero_code_length) = NonZeroU8::new(code_length) {
@@ -652,15 +618,15 @@ impl PrefixCodeGroup {
 //
 
 impl CodeLengthPrefixCode {
-    async fn read<R: AsyncRead + Unpin>(reader: &mut BitBufReader<R, LE>) -> Result<Self, Error> {
+    fn read<R: Read>(reader: &mut BitBufReader<R, LE>) -> Result<Self, Error> {
         const CODE_ORDER: [u8; 19] = [17, 18, 0, 1, 2, 3, 4, 5, 16, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 
-        let code_length_count = 4 + usize::from(reader.read::<u8>(4).await?);
+        let code_length_count = 4 + usize::from(reader.read::<u8>(4)?);
 
         let mut code_lengths = [Default::default(); CODE_ORDER.len()];
         let mut code_order_iter = CODE_ORDER.iter();
         for &code_length_idx in code_order_iter.by_ref().take(code_length_count) {
-            code_lengths[usize::from(code_length_idx)] = (code_length_idx, reader.read(3).await?);
+            code_lengths[usize::from(code_length_idx)] = (code_length_idx, reader.read(3)?);
         }
         for &code_length_idx in code_order_iter {
             code_lengths[usize::from(code_length_idx)] = (code_length_idx, 0);

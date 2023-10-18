@@ -1,14 +1,13 @@
 #![allow(missing_docs)]
 
 use std::fmt::Debug;
-use std::io::Cursor;
+use std::io::{Cursor, Read};
 use std::mem::replace;
 use std::num::NonZeroU32;
 
 use bitstream_io::huffman::{compile_read_tree, ReadHuffmanTree};
 use bitstream_io::{BitRead, BitReader, Endianness, HuffmanRead, Numeric};
 use derive_more::Display;
-use futures_util::{AsyncRead, AsyncReadExt};
 use mediasan_common::util::IoResultExt;
 use mediasan_common::{bail_attach, report_attach};
 
@@ -38,12 +37,12 @@ const LZ77_MAX_SYMBOL: u16 = 39;
 // BitBufReader impls
 //
 
-impl<R: AsyncRead + Unpin, E: Endianness> BitBufReader<R, E> {
+impl<R: Read, E: Endianness> BitBufReader<R, E> {
     pub fn with_capacity(input: R, capacity: usize) -> Self {
         Self { input: Some(input), reader: BitReader::new(Cursor::new(Vec::with_capacity(capacity))), buf_len: 0 }
     }
 
-    pub async fn fill_buf(&mut self) -> Result<(), Error> {
+    pub fn fill_buf(&mut self) -> Result<(), Error> {
         let bit_pos = self.buf_bit_pos();
         let byte_pos = (bit_pos / 8) as usize;
 
@@ -55,10 +54,7 @@ impl<R: AsyncRead + Unpin, E: Endianness> BitBufReader<R, E> {
         let mut buf = reader.into_reader().into_inner();
 
         buf.drain(..byte_pos);
-        input
-            .take((buf.capacity() - buf.len()) as u64)
-            .read_to_end(&mut buf)
-            .await?;
+        input.take((buf.capacity() - buf.len()) as u64).read_to_end(&mut buf)?;
         if self.buf_len - byte_pos == buf.len() {
             self.input = None;
         }
@@ -103,23 +99,23 @@ impl<R: AsyncRead + Unpin, E: Endianness> BitBufReader<R, E> {
         }
     }
 
-    pub async fn read<T: Numeric>(&mut self, bits: u32) -> Result<T, Error> {
+    pub fn read<T: Numeric>(&mut self, bits: u32) -> Result<T, Error> {
         if self.buf_bits() < bits.into() {
-            self.fill_buf().await?;
+            self.fill_buf()?;
         }
         self.buf_read(bits)
     }
 
-    pub async fn read_bit(&mut self) -> Result<bool, Error> {
+    pub fn read_bit(&mut self) -> Result<bool, Error> {
         if self.buf_bits() < 1 {
-            self.fill_buf().await?;
+            self.fill_buf()?;
         }
         self.buf_read_bit()
     }
 
-    pub async fn read_huffman<T: Clone>(&mut self, tree: &CanonicalHuffmanTree<E, T>) -> Result<T, Error> {
+    pub fn read_huffman<T: Clone>(&mut self, tree: &CanonicalHuffmanTree<E, T>) -> Result<T, Error> {
         if self.buf_bits() < tree.longest_code_len.into() {
-            self.fill_buf().await?;
+            self.fill_buf()?;
         }
         self.buf_read_huffman(tree)
     }

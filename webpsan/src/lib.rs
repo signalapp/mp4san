@@ -7,9 +7,9 @@
 //!
 //! # Usage
 //!
-//! The main entry points to the sanitizer are [`sanitize`]/[`sanitize_async`], which take a [`Read`] + [`Skip`] input.
-//! The [`Skip`] trait represents a subset of the [`Seek`] trait; an input stream which can be skipped forward, but not
-//! necessarily seeked to arbitrary positions.
+//! The main entry points to the sanitizer is [`sanitize`], which take a [`Read`] + [`Skip`] input. The [`Skip`] trait
+//! represents a subset of the [`Seek`] trait; an input stream which can be skipped forward, but not necessarily seeked
+//! to arbitrary positions.
 //!
 //! ```
 //! let example_input = b"RIFF\x14\0\0\0WEBPVP8L\x08\0\0\0\x2f\0\0\0\0\x88\x88\x08";
@@ -28,13 +28,11 @@ mod util;
 
 use std::io::Read;
 use std::num::{NonZeroU16, NonZeroU32};
-use std::pin::Pin;
 
 use derive_builder::Builder;
 use derive_more::Display;
-use futures_util::{pin_mut, AsyncRead};
 use mediasan_common::error::{ExtraUnparsedInput, WhileParsingType};
-use mediasan_common::{bail_attach, ensure_attach, ensure_matches_attach, sync, AsyncSkip, InputSpan, ResultExt, Skip};
+use mediasan_common::{bail_attach, ensure_attach, ensure_matches_attach, InputSpan, ResultExt, Skip};
 use parse::error::WhileParsingChunk;
 
 use crate::parse::chunk_type::{ALPH, ANIM, ANMF, EXIF, ICCP, RIFF, VP8, VP8L, VP8X, XMP};
@@ -87,8 +85,8 @@ struct FrameDimensionsMismatch(NonZeroU16, NonZeroU16, NonZeroU32, NonZeroU32);
 /// If the input cannot be parsed, or an IO error occurs, an [`Error`] is returned.
 ///
 /// [`Seek`]: std::io::Seek
-pub fn sanitize<R: Read + Skip + Unpin>(input: R) -> Result<(), Error> {
-    sync::sanitize(input, sanitize_async)
+pub fn sanitize<R: Read + Skip>(input: R) -> Result<(), Error> {
+    sanitize_with_config(input, Config::default())
 }
 
 /// Sanitize a WebP input, with the given [`Config`].
@@ -101,41 +99,10 @@ pub fn sanitize<R: Read + Skip + Unpin>(input: R) -> Result<(), Error> {
 /// If the input cannot be parsed, or an IO error occurs, an [`Error`] is returned.
 ///
 /// [`Seek`]: std::io::Seek
-pub fn sanitize_with_config<R: Read + Skip + Unpin>(input: R, config: Config) -> Result<(), Error> {
-    sync::sanitize(input, |input| sanitize_async_with_config(input, config))
-}
-
-/// Sanitize a WebP input asynchronously.
-///
-/// The `input` must implement [`AsyncRead`] + [`AsyncSkip`], where [`AsyncSkip`] represents a subset of the
-/// [`AsyncSeek`] trait; an input stream which can be skipped forward, but not necessarily seeked to arbitrary
-/// positions.
-///
-/// # Errors
-///
-/// If the input cannot be parsed, or an IO error occurs, an [`Error`] is returned.
-///
-/// [`AsyncSeek`]: futures_util::io::AsyncSeek
-pub async fn sanitize_async<R: AsyncRead + AsyncSkip>(input: R) -> Result<(), Error> {
-    sanitize_async_with_config(input, Default::default()).await
-}
-
-/// Sanitize a WebP input asynchronously, with the given [`Config`].
-///
-/// The `input` must implement [`AsyncRead`] + [`AsyncSkip`], where [`AsyncSkip`] represents a subset of the
-/// [`AsyncSeek`] trait; an input stream which can be skipped forward, but not necessarily seeked to arbitrary
-/// positions.
-///
-/// # Errors
-///
-/// If the input cannot be parsed, or an IO error occurs, an [`Error`] is returned.
-///
-/// [`AsyncSeek`]: futures_util::io::AsyncSeek
-pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(input: R, config: Config) -> Result<(), Error> {
-    let file_reader = ChunkReader::new(input, RIFF);
-    pin_mut!(file_reader);
-    let InputSpan { offset, len } = file_reader.read_header(RIFF).await?;
-    let WebpChunk = file_reader.parse_data().await?;
+pub fn sanitize_with_config<R: Read + Skip>(input: R, config: Config) -> Result<(), Error> {
+    let mut file_reader = ChunkReader::new(input, RIFF);
+    let InputSpan { offset, len } = file_reader.read_header(RIFF)?;
+    let WebpChunk = file_reader.parse_data()?;
 
     ensure_attach!(
         len <= MAX_FILE_LEN.into(),
@@ -144,32 +111,28 @@ pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(input: R, conf
     );
 
     let mut reader = file_reader.child_reader();
-    let mut reader = Pin::new(&mut reader);
 
     log::info!("{name} @ 0x{offset:08x}: {len} bytes", name = RIFF);
 
-    let (name, InputSpan { offset, len }) = reader
-        .read_any_header()
-        .await
-        .attach_printable("while parsing first chunk")?;
+    let (name, InputSpan { offset, len }) = reader.read_any_header().attach_printable("while parsing first chunk")?;
     match name {
         VP8 => {
-            reader.skip_data().await?;
+            reader.skip_data()?;
             log::info!("{name} @ 0x{offset:08x}: {len} bytes");
         }
         VP8L => {
-            let vp8l @ Vp8lChunk { .. } = reader.parse_data().await?;
+            let vp8l @ Vp8lChunk { .. } = reader.parse_data()?;
             let (width, height) = (vp8l.width(), vp8l.height());
-            vp8l.sanitize_image_data(reader.data_reader()).await?;
-            reader.skip_data().await?;
+            vp8l.sanitize_image_data(reader.data_reader())?;
+            reader.skip_data()?;
             log::info!("{name} @ 0x{offset:08x}: {len} bytes, {width}x{height}");
         }
         VP8X => {
-            let vp8x @ Vp8xChunk { flags, .. } = reader.parse_data().await?;
+            let vp8x @ Vp8xChunk { flags, .. } = reader.parse_data()?;
             let (width, height) = (vp8x.canvas_width(), vp8x.canvas_height());
             log::info!("{name} @ 0x{offset:08x}: {width}x{height}, flags {flags:08b}");
 
-            sanitize_extended(&mut reader, &vp8x, &config).await?
+            sanitize_extended(&mut reader, &vp8x, &config)?
         }
         _ => {
             log::info!("{name} @ 0x{offset:08x}: {len} bytes");
@@ -183,10 +146,9 @@ pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(input: R, conf
 
     // It's not clear whether the WebP spec accepts unknown chunks at the end of simple format files, but many of the
     // WebP test vectors contain non-standard trailing informational chunks.
-    while reader.has_remaining().await? {
+    while reader.has_remaining()? {
         let (name, InputSpan { offset, len }) = reader
             .read_any_header()
-            .await
             .attach_printable("while parsing unknown chunks")?;
         match name {
             ALPH | ANIM | EXIF | ICCP | VP8 | VP8L | VP8X | XMP => {
@@ -195,12 +157,12 @@ pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(input: R, conf
             ANMF => bail_attach!(ParseError::InvalidChunkLayout, "non-contiguous ANMF chunk"),
             _ => ensure_attach!(config.allow_unknown_chunks, ParseError::UnsupportedChunk(name)),
         }
-        reader.skip_data().await?;
+        reader.skip_data()?;
         log::info!("{name} @ 0x{offset:08x}: {len} bytes");
     }
 
     ensure_attach!(
-        !file_reader.has_remaining().await?,
+        !file_reader.has_remaining()?,
         ParseError::InvalidInput,
         ExtraUnparsedInput,
     );
@@ -208,65 +170,60 @@ pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(input: R, conf
     Ok(())
 }
 
-async fn sanitize_extended<R: AsyncRead + AsyncSkip>(
-    reader: &mut Pin<&mut ChunkReader<R>>,
+fn sanitize_extended<R: Read + Skip>(
+    reader: &mut ChunkReader<R>,
     vp8x: &Vp8xChunk,
     config: &Config,
 ) -> Result<(), Error> {
     if vp8x.flags.contains(Vp8xFlags::HAS_ICCP_CHUNK) {
-        let InputSpan { offset, len } = reader.read_header(ICCP).await?;
-        reader.skip_data().await?;
+        let InputSpan { offset, len } = reader.read_header(ICCP)?;
+        reader.skip_data()?;
         log::info!("{name} @ 0x{offset:08x}: {len} bytes", name = ICCP);
     }
 
     if vp8x.flags.contains(Vp8xFlags::IS_ANIMATED) {
-        sanitize_animated(reader, vp8x, config).await?;
+        sanitize_animated(reader, vp8x, config)?;
     } else {
-        sanitize_still(reader, vp8x)
-            .await
-            .attach_printable("while parsing still image data")?;
+        sanitize_still(reader, vp8x).attach_printable("while parsing still image data")?;
     }
 
     if vp8x.flags.contains(Vp8xFlags::HAS_EXIF_CHUNK) {
-        let InputSpan { offset, len } = reader.read_header(EXIF).await?;
-        reader.skip_data().await?;
+        let InputSpan { offset, len } = reader.read_header(EXIF)?;
+        reader.skip_data()?;
         log::info!("{name} @ 0x{offset:08x}: {len} bytes", name = EXIF);
     }
 
     if vp8x.flags.contains(Vp8xFlags::HAS_XMP_CHUNK) {
-        let InputSpan { offset, len } = reader.read_header(XMP).await?;
-        reader.skip_data().await?;
+        let InputSpan { offset, len } = reader.read_header(XMP)?;
+        reader.skip_data()?;
         log::info!("{name} @ 0x{offset:08x}: {len} bytes", name = XMP);
     }
 
     Ok(())
 }
 
-async fn sanitize_still<R: AsyncRead + AsyncSkip>(
-    reader: &mut Pin<&mut ChunkReader<R>>,
-    vp8x: &Vp8xChunk,
-) -> Result<(), Error> {
+fn sanitize_still<R: Read + Skip>(reader: &mut ChunkReader<R>, vp8x: &Vp8xChunk) -> Result<(), Error> {
     let mut alph = None;
     if vp8x.flags.contains(Vp8xFlags::HAS_ALPH_CHUNK) {
-        let InputSpan { offset, len } = reader.read_header(ALPH).await?;
-        let read_alph @ AlphChunk { flags } = reader.parse_data().await?;
-        read_alph.sanitize_image_data(reader.data_reader(), vp8x).await?;
-        reader.skip_data().await?;
+        let InputSpan { offset, len } = reader.read_header(ALPH)?;
+        let read_alph @ AlphChunk { flags } = reader.parse_data()?;
+        read_alph.sanitize_image_data(reader.data_reader(), vp8x)?;
+        reader.skip_data()?;
         log::info!("{name} @ 0x{offset:08x}: {len} bytes, flags {flags:08b}", name = ALPH);
         alph = Some(read_alph);
     }
 
-    ensure_attach!(reader.has_remaining().await?, ParseError::MissingRequiredChunk(VP8));
-    let (name, InputSpan { offset, len }) = reader.read_any_header().await?;
+    ensure_attach!(reader.has_remaining()?, ParseError::MissingRequiredChunk(VP8));
+    let (name, InputSpan { offset, len }) = reader.read_any_header()?;
     match name {
         VP8 => {
-            reader.skip_data().await?;
+            reader.skip_data()?;
             log::info!("{name} @ 0x{offset:08x}: {len} bytes");
         }
         VP8L => {
             ensure_matches_attach!(alph, None, ParseError::InvalidChunkLayout, WhileParsingChunk(VP8L));
 
-            let vp8l @ Vp8lChunk { .. } = reader.parse_data().await?;
+            let vp8l @ Vp8lChunk { .. } = reader.parse_data()?;
             let (width, height) = (vp8l.width(), vp8l.height());
             ensure_attach!(
                 (width.into(), height.into()) == (vp8x.canvas_width(), vp8x.canvas_height()),
@@ -274,8 +231,8 @@ async fn sanitize_still<R: AsyncRead + AsyncSkip>(
                 FrameDimensionsMismatch(width, height, vp8x.canvas_width(), vp8x.canvas_height()),
                 WhileParsingType::new::<Vp8lChunk>(),
             );
-            vp8l.sanitize_image_data(reader.data_reader()).await?;
-            reader.skip_data().await?;
+            vp8l.sanitize_image_data(reader.data_reader())?;
+            reader.skip_data()?;
             log::info!("{name} @ 0x{offset:08x}: {len} bytes, {width}x{height}");
         }
         _ => bail_attach!(
@@ -287,24 +244,24 @@ async fn sanitize_still<R: AsyncRead + AsyncSkip>(
     Ok(())
 }
 
-async fn sanitize_animated<R: AsyncRead + AsyncSkip>(
-    reader: &mut Pin<&mut ChunkReader<R>>,
+fn sanitize_animated<R: Read + Skip>(
+    reader: &mut ChunkReader<R>,
     vp8x: &Vp8xChunk,
     config: &Config,
 ) -> Result<(), Error> {
-    let InputSpan { offset, len } = reader.read_header(ANIM).await?;
-    let AnimChunk { .. } = reader.parse_data().await?;
+    let InputSpan { offset, len } = reader.read_header(ANIM)?;
+    let AnimChunk { .. } = reader.parse_data()?;
     log::info!("{name} @ 0x{offset:08x}: {len} bytes", name = ANIM);
 
     ensure_matches_attach!(
-        reader.peek_header().await?,
+        reader.peek_header()?,
         Some(ANMF),
         ParseError::MissingRequiredChunk(ANMF),
     );
 
-    while let Some(ANMF) = reader.peek_header().await? {
-        let InputSpan { offset, len } = reader.read_header(ANMF).await?;
-        let anmf @ AnmfChunk { flags, .. } = reader.parse_data().await?;
+    while let Some(ANMF) = reader.peek_header()? {
+        let InputSpan { offset, len } = reader.read_header(ANMF)?;
+        let anmf @ AnmfChunk { flags, .. } = reader.parse_data()?;
         let (x, y, width, height) = (anmf.x(), anmf.y(), anmf.width(), anmf.height());
         log::info!(
             "{name} @ 0x{offset:08x}: {len} bytes, {width}x{height} @ ({x}, {y}), flags {flags:08b}",
@@ -312,15 +269,14 @@ async fn sanitize_animated<R: AsyncRead + AsyncSkip>(
         );
 
         let mut anmf_reader = reader.child_reader();
-        let mut anmf_reader = Pin::new(&mut anmf_reader);
 
         let mut alph = None;
         if vp8x.flags.contains(Vp8xFlags::HAS_ALPH_CHUNK) {
-            if let Some(ALPH) = anmf_reader.peek_header().await? {
-                let InputSpan { offset, len } = anmf_reader.read_header(ALPH).await?;
-                let read_alph @ AlphChunk { flags } = anmf_reader.parse_data().await?;
-                read_alph.sanitize_image_data(anmf_reader.data_reader(), vp8x).await?;
-                anmf_reader.skip_data().await?;
+            if let Some(ALPH) = anmf_reader.peek_header()? {
+                let InputSpan { offset, len } = anmf_reader.read_header(ALPH)?;
+                let read_alph @ AlphChunk { flags } = anmf_reader.parse_data()?;
+                read_alph.sanitize_image_data(anmf_reader.data_reader(), vp8x)?;
+                anmf_reader.skip_data()?;
                 log::info!("{name} @ 0x{offset:08x}: {len} bytes, flags {flags:08b}", name = ALPH);
                 alph = Some(read_alph);
             }
@@ -328,17 +284,16 @@ async fn sanitize_animated<R: AsyncRead + AsyncSkip>(
 
         let (name, InputSpan { offset, len }) = anmf_reader
             .read_any_header()
-            .await
             .attach_printable("while parsing animated image frame")?;
         match name {
             VP8 => {
-                anmf_reader.skip_data().await?;
+                anmf_reader.skip_data()?;
                 log::info!("{name} @ 0x{offset:08x}: {len} bytes");
             }
             VP8L => {
                 ensure_matches_attach!(alph, None, ParseError::InvalidChunkLayout, WhileParsingChunk(VP8L));
 
-                let vp8l @ Vp8lChunk { .. } = anmf_reader.parse_data().await?;
+                let vp8l @ Vp8lChunk { .. } = anmf_reader.parse_data()?;
                 let (width, height) = (vp8l.width(), vp8l.height());
                 ensure_attach!(
                     (vp8l.width().into(), vp8l.height().into()) == (vp8x.canvas_width(), vp8x.canvas_height()),
@@ -346,8 +301,8 @@ async fn sanitize_animated<R: AsyncRead + AsyncSkip>(
                     FrameDimensionsMismatch(vp8l.width(), vp8l.height(), vp8x.canvas_width(), vp8x.canvas_height()),
                     WhileParsingType::new::<Vp8lChunk>(),
                 );
-                vp8l.sanitize_image_data(anmf_reader.data_reader()).await?;
-                anmf_reader.skip_data().await?;
+                vp8l.sanitize_image_data(anmf_reader.data_reader())?;
+                anmf_reader.skip_data()?;
                 log::info!("{name} @ 0x{offset:08x}: {len} bytes, {width}x{height}");
             }
             _ => bail_attach!(
@@ -357,10 +312,9 @@ async fn sanitize_animated<R: AsyncRead + AsyncSkip>(
             ),
         }
 
-        while anmf_reader.has_remaining().await? {
+        while anmf_reader.has_remaining()? {
             let (name, InputSpan { offset, len }) = anmf_reader
                 .read_any_header()
-                .await
                 .attach_printable("while parsing unknown chunks")?;
             match name {
                 ALPH | ANMF | ANIM | EXIF | ICCP | VP8 | VP8L | VP8X | XMP => bail_attach!(
@@ -374,7 +328,7 @@ async fn sanitize_animated<R: AsyncRead + AsyncSkip>(
                     WhileParsingChunk(ANMF)
                 ),
             }
-            anmf_reader.skip_data().await?;
+            anmf_reader.skip_data()?;
             log::info!("{name} @ 0x{offset:08x}: {len} bytes");
         }
     }

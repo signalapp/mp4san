@@ -1,8 +1,8 @@
 use std::io;
+use std::io::Read;
 
 use assert_matches::assert_matches;
 use bytes::{Buf, BufMut, BytesMut};
-use futures_util::{AsyncRead, AsyncReadExt};
 use mediasan_common::error::WhileParsingType;
 use mediasan_common::{ensure_attach, Result};
 
@@ -45,9 +45,9 @@ impl ChunkHeader {
         self.len % 2 == 1
     }
 
-    pub(crate) async fn read<R: AsyncRead + Unpin>(mut input: R) -> io::Result<Self> {
+    pub(crate) fn read<R: Read>(mut input: R) -> io::Result<Self> {
         let mut buf = [0; Self::ENCODED_LEN as usize];
-        input.read_exact(&mut buf).await?;
+        input.read_exact(&mut buf)?;
         let value = Self::parse(&buf[..]).map_err(|err| {
             assert_matches!(err.into_inner(), ParseError::TruncatedChunk);
             io::ErrorKind::UnexpectedEof

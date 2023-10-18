@@ -1,14 +1,13 @@
 #![allow(missing_docs)]
 
 use std::fmt::Debug;
-use std::io::Cursor;
+use std::io::{Cursor, Read};
 use std::num::NonZeroU16;
 use std::result::Result as StdResult;
 
 use bitstream_io::{BitRead, BitReader, LE};
 use bytes::{Buf, BytesMut};
 use derive_more::Display;
-use futures_util::AsyncRead;
 use mediasan_common::ensure_attach;
 use mediasan_common::parse::FourCC;
 use mediasan_common::Result;
@@ -50,9 +49,9 @@ impl Vp8lChunk {
         self.height
     }
 
-    pub async fn sanitize_image_data<R: AsyncRead + Unpin>(&self, input: R) -> StdResult<(), Error> {
+    pub fn sanitize_image_data<R: Read>(&self, input: R) -> StdResult<(), Error> {
         let mut reader = BitBufReader::<_, LE>::with_capacity(input, 4096);
-        let _image = LosslessImage::read(&mut reader, self.width.into(), self.height.into()).await?;
+        let _image = LosslessImage::read(&mut reader, self.width.into(), self.height.into())?;
         Ok(())
     }
 }

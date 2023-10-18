@@ -1,10 +1,10 @@
 #![allow(missing_docs)]
 
+use std::io::Read;
 use std::result::Result as StdResult;
 
 use bitstream_io::LE;
 use bytes::{BufMut, BytesMut};
-use futures_util::AsyncRead;
 use mediasan_common::parse::FourCC;
 use mediasan_common::Result;
 
@@ -36,11 +36,11 @@ bitflags::bitflags! {
 //
 
 impl AlphChunk {
-    pub async fn sanitize_image_data<R: AsyncRead + Unpin>(&self, input: R, vp8x: &Vp8xChunk) -> StdResult<(), Error> {
+    pub fn sanitize_image_data<R: Read>(&self, input: R, vp8x: &Vp8xChunk) -> StdResult<(), Error> {
         let (width, height) = (vp8x.canvas_width(), vp8x.canvas_height());
         if self.flags.contains(AlphFlags::COMPRESS_LOSSLESS) {
             let mut reader = BitBufReader::<_, LE>::with_capacity(input, 4096);
-            let _image = LosslessImage::read(&mut reader, width, height).await?;
+            let _image = LosslessImage::read(&mut reader, width, height)?;
         }
         Ok(())
     }

@@ -1,11 +1,9 @@
-use std::task::{Context, Poll};
-use std::{io, pin::Pin};
+use std::io;
+use std::io::Read;
 
 use bitstream_io::LE;
-use criterion::async_executor::FuturesExecutor;
 use criterion::measurement::Measurement;
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkGroup, Criterion};
-use futures_util::AsyncRead;
 use webpsan::parse::{BitBufReader, CanonicalHuffmanTree};
 use webpsan::Error;
 
@@ -19,9 +17,9 @@ criterion_main!(benches);
 
 struct BlackBoxZeroesInput;
 
-impl AsyncRead for BlackBoxZeroesInput {
-    fn poll_read(self: Pin<&mut Self>, _cx: &mut Context<'_>, buf: &mut [u8]) -> Poll<io::Result<usize>> {
-        black_box(Poll::Ready(Ok(buf.len())))
+impl Read for BlackBoxZeroesInput {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        black_box(Ok(buf.len()))
     }
 }
 
@@ -48,11 +46,11 @@ fn read_huffman<M: Measurement, S: Clone>(mut group: BenchmarkGroup<'_, M>, code
     let setup = || BitBufReader::<_, LE>::with_capacity(BlackBoxZeroesInput, buf_len);
     group.throughput(criterion::Throughput::Bytes(buf_len as u64));
     group.bench_function("buf_read_huffman", |bencher| {
-        bencher.to_async(FuturesExecutor).iter_batched(
+        bencher.iter_batched(
             setup,
-            |mut reader| async move {
+            |mut reader| {
                 if code.longest_code_len() != 0 {
-                    reader.fill_buf().await?;
+                    reader.fill_buf()?;
                 }
                 for _ in 0..buf_len * 8 {
                     black_box(reader.buf_read_huffman(code))?;
@@ -63,11 +61,11 @@ fn read_huffman<M: Measurement, S: Clone>(mut group: BenchmarkGroup<'_, M>, code
         )
     });
     group.bench_function("read_huffman", |bencher| {
-        bencher.to_async(FuturesExecutor).iter_batched(
+        bencher.iter_batched(
             setup,
-            |mut reader| async move {
+            |mut reader| {
                 for _ in 0..buf_len * 8 {
-                    black_box(reader.read_huffman(code).await)?;
+                    black_box(reader.read_huffman(code))?;
                 }
                 Ok::<_, Error>(())
             },
