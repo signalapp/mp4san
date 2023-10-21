@@ -6,7 +6,6 @@ use std::num::NonZeroU32;
 use bytes::BytesMut;
 use mediasan_common::error::{ExtraUnparsedInput, WhileParsingType};
 use mediasan_common::parse::FourCC;
-use mediasan_common::skip::{buf_skip, buf_stream_len, buf_stream_position};
 use mediasan_common::util::IoResultExt;
 use mediasan_common::{bail_attach, ensure_attach, ensure_matches_attach, report_attach, InputSpan, Skip};
 
@@ -123,7 +122,7 @@ impl<R: Read + Skip> ChunkReader<R> {
             None => State::ReadingPadding { header, token: () },
         };
 
-        let offset = buf_stream_position(&mut self.inner)? - u64::from(ChunkHeader::ENCODED_LEN);
+        let offset = self.inner.stream_position()? - u64::from(ChunkHeader::ENCODED_LEN);
         let len = u64::from(header.len) + u64::from(ChunkHeader::ENCODED_LEN);
         Ok((header.name, InputSpan { offset, len }))
     }
@@ -180,7 +179,7 @@ impl<R: Read + Skip> ChunkReader<R> {
             State::ReadingPadding { token, .. } => match token {},
         };
 
-        buf_skip(&mut self.inner, remaining.get().into()).map_eof(|_| {
+        self.inner.skip(remaining.get().into()).map_eof(|_| {
             Error::Parse(report_attach!(
                 ParseError::TruncatedChunk,
                 WhileParsingChunk(header.name),
@@ -276,7 +275,7 @@ impl<R: Read + Skip> Skip for ChunkDataReader<'_, R> {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
 
-        buf_skip(&mut self.reader.inner, skip_amount)?;
+        self.reader.inner.skip(skip_amount)?;
 
         self.reader.state = match NonZeroU32::new(remaining.get() - skip_amount as u32) {
             Some(remaining) => State::ReadingBody { header, remaining },
@@ -286,10 +285,10 @@ impl<R: Read + Skip> Skip for ChunkDataReader<'_, R> {
     }
 
     fn stream_position(&mut self) -> io::Result<u64> {
-        buf_stream_position(&mut self.reader.inner)
+        self.reader.inner.stream_position()
     }
 
     fn stream_len(&mut self) -> io::Result<u64> {
-        buf_stream_len(&mut self.reader.inner)
+        self.reader.inner.stream_len()
     }
 }

@@ -65,11 +65,9 @@ use derive_builder::Builder;
 use derive_more::Display;
 use futures_util::io::BufReader;
 use futures_util::{pin_mut, AsyncBufReadExt, AsyncRead};
-use mediasan_common::async_skip::{
-    buf_skip as skip, buf_stream_len as stream_len, buf_stream_position as stream_position,
-};
 use mediasan_common::sync;
 use mediasan_common::util::{checked_add_signed, IoResultExt};
+use mediasan_common::AsyncSkipExt;
 
 use crate::error::Report;
 use crate::parse::error::{MultipleBoxes, WhileParsingBox};
@@ -109,7 +107,7 @@ pub struct SanitizedMetadata {
     pub data: InputSpan,
 }
 
-pub use mediasan_common::{AsyncSkip, InputSpan, Skip};
+pub use mediasan_common::{AsyncSkip, InputSpan, SeekSkipAdapter, Skip};
 
 /// The ISO Base Media File Format "compatble brand" recognized by the sanitizer.
 ///
@@ -260,7 +258,7 @@ pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(
     let mut moov_offset = None;
 
     while !reader.as_mut().fill_buf().await?.is_empty() {
-        let start_pos = stream_position(reader.as_mut()).await?;
+        let start_pos = reader.as_mut().stream_position().await?;
 
         let header = BoxHeader::read(&mut reader)
             .await
@@ -487,9 +485,9 @@ async fn skip_box<R: AsyncRead + AsyncSkip>(
 ) -> Result<u64, Error> {
     let box_data_size = match header.box_data_size()? {
         Some(box_size) => box_size,
-        None => stream_len(reader.as_mut()).await? - stream_position(reader.as_mut()).await?,
+        None => reader.as_mut().stream_len().await? - reader.as_mut().stream_position().await?,
     };
-    skip(reader, box_data_size).await.map_eof(|_| {
+    reader.skip(box_data_size).await.map_eof(|_| {
         Error::Parse(report_attach!(
             ParseError::TruncatedBox,
             WhileParsingBox(header.box_type())

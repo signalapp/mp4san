@@ -14,11 +14,11 @@ use dyn_clonable::clonable;
 use futures_util::io::BufReader;
 use futures_util::{AsyncRead, AsyncReadExt};
 use mediasan_common::error::WhileParsingType;
-use mediasan_common::ResultExt;
+use mediasan_common::{AsyncSkipExt, ResultExt};
 
 use crate::error::Result;
 use crate::util::IoResultExt;
-use crate::{stream_len, stream_position, AsyncSkip, BoxDataTooLarge, Error};
+use crate::{AsyncSkip, BoxDataTooLarge, Error};
 
 use super::error::{MultipleBoxes, WhileParsingBox};
 use super::{BoxHeader, BoxType, Mp4Value, ParseError};
@@ -86,7 +86,7 @@ impl<T: ParsedBox + ?Sized> Mp4Box<T> {
     {
         let box_data_size = match header.box_data_size()? {
             Some(box_data_size) => box_data_size,
-            None => stream_len(reader.as_mut()).await? - stream_position(reader.as_mut()).await?,
+            None => reader.as_mut().stream_len().await? - reader.as_mut().stream_position().await?,
         };
 
         ensure_attach!(

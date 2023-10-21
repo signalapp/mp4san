@@ -32,7 +32,7 @@ use std::num::{NonZeroU16, NonZeroU32};
 use derive_builder::Builder;
 use derive_more::Display;
 use mediasan_common::error::{ExtraUnparsedInput, WhileParsingType};
-use mediasan_common::{bail_attach, ensure_attach, ensure_matches_attach, InputSpan, ResultExt, Skip};
+use mediasan_common::{bail_attach, ensure_attach, ensure_matches_attach, InputSpan, ResultExt};
 use parse::error::WhileParsingChunk;
 
 use crate::parse::chunk_type::{ALPH, ANIM, ANMF, EXIF, ICCP, RIFF, VP8, VP8L, VP8X, XMP};
@@ -57,6 +57,8 @@ pub struct Config {
     #[builder(default)]
     pub allow_unknown_chunks: bool,
 }
+
+pub use mediasan_common::{Report, SeekSkipAdapter, Skip};
 
 /// Maximum file length as permitted by WebP.
 pub const MAX_FILE_LEN: u32 = u32::MAX - 2;
