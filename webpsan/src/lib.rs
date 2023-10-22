@@ -67,6 +67,10 @@ pub const MAX_FILE_LEN: u32 = u32::MAX - 2;
 // private types
 //
 
+trait ReadSkip: Read + Skip {}
+
+type DynChunkReader<'a> = ChunkReader<dyn ReadSkip + 'a>;
+
 #[derive(Clone, Copy, Debug, Display)]
 #[display(fmt = "frame dimensions `{_0}`x`{_1}` do not match canvas dimensions `{_2}`x`{_3}`")]
 struct FrameDimensionsMismatch(NonZeroU16, NonZeroU16, NonZeroU32, NonZeroU32);
@@ -101,8 +105,8 @@ pub fn sanitize<R: Read + Skip>(input: R) -> Result<(), Error> {
 /// If the input cannot be parsed, or an IO error occurs, an [`Error`] is returned.
 ///
 /// [`Seek`]: std::io::Seek
-pub fn sanitize_with_config<R: Read + Skip>(input: R, config: Config) -> Result<(), Error> {
-    let mut file_reader = ChunkReader::new(input, RIFF);
+pub fn sanitize_with_config<R: Read + Skip>(mut input: R, config: Config) -> Result<(), Error> {
+    let file_reader: &mut DynChunkReader<'_> = &mut ChunkReader::new(&mut input, RIFF);
     let InputSpan { offset, len } = file_reader.read_header(RIFF)?;
     let WebpChunk = file_reader.parse_data()?;
 
@@ -112,7 +116,7 @@ pub fn sanitize_with_config<R: Read + Skip>(input: R, config: Config) -> Result<
         WhileParsingChunk(RIFF)
     );
 
-    let mut reader = file_reader.child_reader();
+    let reader: &mut DynChunkReader<'_> = &mut file_reader.child_reader();
 
     log::info!("{name} @ 0x{offset:08x}: {len} bytes", name = RIFF);
 
@@ -134,7 +138,7 @@ pub fn sanitize_with_config<R: Read + Skip>(input: R, config: Config) -> Result<
             let (width, height) = (vp8x.canvas_width(), vp8x.canvas_height());
             log::info!("{name} @ 0x{offset:08x}: {width}x{height}, flags {flags:08b}");
 
-            sanitize_extended(&mut reader, &vp8x, &config)?
+            sanitize_extended(reader, &vp8x, &config)?
         }
         _ => {
             log::info!("{name} @ 0x{offset:08x}: {len} bytes");
@@ -172,11 +176,7 @@ pub fn sanitize_with_config<R: Read + Skip>(input: R, config: Config) -> Result<
     Ok(())
 }
 
-fn sanitize_extended<R: Read + Skip>(
-    reader: &mut ChunkReader<R>,
-    vp8x: &Vp8xChunk,
-    config: &Config,
-) -> Result<(), Error> {
+fn sanitize_extended(reader: &mut DynChunkReader<'_>, vp8x: &Vp8xChunk, config: &Config) -> Result<(), Error> {
     if vp8x.flags.contains(Vp8xFlags::HAS_ICCP_CHUNK) {
         let InputSpan { offset, len } = reader.read_header(ICCP)?;
         reader.skip_data()?;
@@ -204,7 +204,7 @@ fn sanitize_extended<R: Read + Skip>(
     Ok(())
 }
 
-fn sanitize_still<R: Read + Skip>(reader: &mut ChunkReader<R>, vp8x: &Vp8xChunk) -> Result<(), Error> {
+fn sanitize_still(reader: &mut DynChunkReader<'_>, vp8x: &Vp8xChunk) -> Result<(), Error> {
     let mut alph = None;
     if vp8x.flags.contains(Vp8xFlags::HAS_ALPH_CHUNK) {
         let InputSpan { offset, len } = reader.read_header(ALPH)?;
@@ -246,11 +246,7 @@ fn sanitize_still<R: Read + Skip>(reader: &mut ChunkReader<R>, vp8x: &Vp8xChunk)
     Ok(())
 }
 
-fn sanitize_animated<R: Read + Skip>(
-    reader: &mut ChunkReader<R>,
-    vp8x: &Vp8xChunk,
-    config: &Config,
-) -> Result<(), Error> {
+fn sanitize_animated(reader: &mut DynChunkReader<'_>, vp8x: &Vp8xChunk, config: &Config) -> Result<(), Error> {
     let InputSpan { offset, len } = reader.read_header(ANIM)?;
     let AnimChunk { .. } = reader.parse_data()?;
     log::info!("{name} @ 0x{offset:08x}: {len} bytes", name = ANIM);
@@ -270,7 +266,7 @@ fn sanitize_animated<R: Read + Skip>(
             name = ANMF
         );
 
-        let mut anmf_reader = reader.child_reader();
+        let anmf_reader: &mut DynChunkReader<'_> = &mut reader.child_reader();
 
         let mut alph = None;
         if vp8x.flags.contains(Vp8xFlags::HAS_ALPH_CHUNK) {
@@ -366,6 +362,12 @@ impl ConfigBuilder {
         self.try_build().unwrap()
     }
 }
+
+//
+// ReadSkip impls
+//
+
+impl<T: Read + Skip> ReadSkip for T {}
 
 #[cfg(doctest)]
 #[doc = include_str!("../README.md")]

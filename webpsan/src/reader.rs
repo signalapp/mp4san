@@ -13,12 +13,12 @@ use crate::parse::error::{ExpectedChunk, ParseResultExt, WhileParsingChunk};
 use crate::parse::{ChunkHeader, ParseChunk, ParseError, WebmPrim};
 use crate::Error;
 
-pub struct ChunkReader<R> {
+pub struct ChunkReader<R: ?Sized> {
     state: State,
     inner: BufReader<R>,
 }
 
-pub struct ChunkDataReader<'a, R> {
+pub struct ChunkDataReader<'a, R: ?Sized> {
     reader: &'a mut ChunkReader<R>,
 }
 
@@ -40,7 +40,9 @@ impl<R: Read + Skip> ChunkReader<R> {
         let inner = BufReader::with_capacity(ChunkHeader::ENCODED_LEN as usize, input);
         Self { state: State::Idle { last: chunk_name }, inner }
     }
+}
 
+impl<R: Read + Skip + ?Sized> ChunkReader<R> {
     pub fn has_remaining(&mut self) -> Result<bool, Error> {
         match self.read_padding()? {
             State::Idle { .. } => (),
@@ -240,7 +242,7 @@ impl<R: Read + Skip> ChunkReader<R> {
 // ChunkDataReader impls
 //
 
-impl<R: Read> Read for ChunkDataReader<'_, R> {
+impl<R: Read + ?Sized> Read for ChunkDataReader<'_, R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let (header, remaining) = match &self.reader.state {
             State::Idle { .. } | State::ReadingPadding { .. } => return Ok(0),
@@ -260,7 +262,7 @@ impl<R: Read> Read for ChunkDataReader<'_, R> {
     }
 }
 
-impl<R: Read + Skip> Skip for ChunkDataReader<'_, R> {
+impl<R: Read + Skip + ?Sized> Skip for ChunkDataReader<'_, R> {
     fn skip(&mut self, skip_amount: u64) -> io::Result<()> {
         let (header, remaining) = match &self.reader.state {
             State::Idle { .. } | State::ReadingPadding { .. } if skip_amount == 0 => return Ok(()),
