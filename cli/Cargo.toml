@@ -1,5 +1,5 @@
 [package]
-name = "mp4san-cli"
+name = "mediasan-cli"
 edition = "2021"
 version = "0.1.0"
 
@@ -9,5 +9,6 @@ publish = false
 anyhow = "1.0.68"
 clap = { version = "4.0.32", features = ["derive"] }
 mp4san = { path = "../mp4san" }
+webpsan = { path = "../webpsan" }
 env_logger = "0.10.0"
 log = "0.4.17"
