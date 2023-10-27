@@ -134,16 +134,16 @@ impl<E: Endianness, S: Clone> CanonicalHuffmanTree<E, S> {
     where
         S: Copy + Debug + Ord + 'static,
     {
-        let longest_code_len = u32::from(code_lengths.iter().map(|&(_, len)| len).max().unwrap_or_default());
         let symbols = Self::symbols(code_lengths);
         log::debug!("symbols: {symbols:?}");
-        let read_tree =
-            compile_read_tree(symbols).map_err(|err| report_attach!(ParseError::InvalidVp8lPrefixCode, err))?;
-        Ok(Self { read_tree, longest_code_len })
+        Self::from_symbols(symbols)
     }
 
     pub fn from_symbols(symbols: Vec<(S, Vec<u8>)>) -> Result<Self, Error> {
-        let longest_code_len = symbols.iter().map(|(_, code)| code.len()).max().unwrap_or_default() as u32;
+        let longest_code_len = match &symbols[..] {
+            [_symbol] => 0,
+            _ => symbols.iter().map(|(_, code)| code.len()).max().unwrap_or_default() as u32,
+        };
         let read_tree =
             compile_read_tree(symbols).map_err(|err| report_attach!(ParseError::InvalidVp8lPrefixCode, err))?;
         Ok(Self { read_tree, longest_code_len })
