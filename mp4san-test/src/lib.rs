@@ -117,28 +117,97 @@ pub fn example_mdat() -> Vec<u8> {
 
 pub fn example_moov() -> Vec<u8> {
     const EXAMPLE_MOOV: &[&[u8]] = &[
-        &[0, 0, 0, 64], // box size
-        b"moov",        // box type
+        &[0, 0, 1, 109], // box size
+        b"moov",         // box type
         //
         // trak box (inside moov box)
         //
-        &[0, 0, 0, 48], // box size
-        b"trak",        // box type
+        &[0, 0, 0, 249], // box size
+        b"trak",         // box type
+        //
+        // tkhd box (inside trak box)
+        //
+        &[0, 0, 0, 92],      // box size
+        b"tkhd",             // box type
+        &[0, 0, 0, 0],       // box version & flags
+        b"\x64\x18\xa0\x50", // creation time
+        b"\x64\x18\xa0\x50", // modification time
+        &[0, 0, 0, 1],       // track ID
+        &[0, 0, 0, 0],       // reserved
+        &[0, 0, 0, 0],       // duration
+        &[0; 8],             // reserved
+        &[0, 0],             // layer
+        &[0, 0],             // alternate group
+        &[0, 0],             // volume
+        &[0, 0],             // reserved
+        &[0, 1, 0, 0],       // matrix[0]
+        &[0, 0, 0, 0],       // matrix[1]
+        &[0, 0, 0, 0],       // matrix[2]
+        &[0, 0, 0, 0],       // matrix[3]
+        &[0, 1, 0, 0],       // matrix[4]
+        &[0, 0, 0, 0],       // matrix[5]
+        &[0, 0, 0, 0],       // matrix[6]
+        &[0, 0, 0, 0],       // matrix[7]
+        &[64, 0, 0, 0],      // matrix[8]
+        &[0, 0, 0, 0],       // width
+        &[0, 0, 0, 0],       // height
         //
         // mdia box (inside trak box)
         //
-        &[0, 0, 0, 40], // box size
-        b"mdia",        // box type
+        &[0, 0, 0, 149], // box size
+        b"mdia",         // box type
+        //
+        // mdhd box (inside mdia box)
+        //
+        &[0, 0, 0, 32],      // box size
+        b"mdhd",             // box type
+        &[0, 0, 0, 0],       // box version & flags
+        b"\x64\x18\xa0\x50", // creation time
+        b"\x64\x18\xa0\x50", // modification time
+        &[0, 0, 2, 88],      // time scale
+        &[0, 0, 0, 0],       // duration
+        b"\x55\xc4",         // padding & language
+        &[0, 0],             // pre defined
+        //
+        // hdlr box (inside mdia box)
+        //
+        &[0, 0, 0, 33], // box size
+        b"hdlr",        // box type
+        &[0, 0, 0, 0],  // box version & flags
+        &[0, 0, 0, 0],  // pre defined
+        b"vide",        // handler type
+        &[0; 12],       // reserved
+        b"\0",          // name
         //
         // minf box (inside mdia box)
         //
-        &[0, 0, 0, 32], // box size
+        &[0, 0, 0, 76], // box size
         b"minf",        // box type
         //
         // stbl box (inside minf box)
         //
-        &[0, 0, 0, 24], // box size
+        &[0, 0, 0, 68], // box size
         b"stbl",        // box type
+        //
+        // stsd box (inside stbl box)
+        //
+        &[0, 0, 0, 12], // box size
+        b"stsd",        // box type
+        &[0, 0, 0, 0],  // entry count
+        //
+        // stts box (inside stbl box)
+        //
+        &[0, 0, 0, 16], // box size
+        b"stts",        // box type
+        &[0, 0, 0, 0],  // box version & flags
+        &[0, 0, 0, 0],  // entry count
+        //
+        // stsc box (inside stbl box)
+        //
+        &[0, 0, 0, 16], // box size
+        b"stsc",        // box type
+        &[0, 0, 0, 0],  // box version & flags
+        &[0, 0, 0, 0],  // entry count
         //
         // stco box (inside stbl box)
         //
@@ -149,8 +218,28 @@ pub fn example_moov() -> Vec<u8> {
         //
         // mvhd box (inside moov box)
         //
-        &[0, 0, 0, 8],
-        b"mvhd",
+        &[0, 0, 0, 108],       // box size
+        b"mvhd",               // box type
+        &[0, 0, 0, 0],         // box version & flags
+        b"\x64\x18\xa0\x50",   // creation time
+        b"\x64\x18\xa0\x50",   // modification time
+        &[0, 0, 2, 88],        // time scale
+        &[0, 0, 0, 0],         // duration
+        &[0, 1, 0, 0],         // rate
+        &[1, 0],               // volume
+        &[0, 0],               // reserved
+        &[0; 8],               // reserved
+        &[0, 1, 0, 0],         // matrix[0]
+        &[0, 0, 0, 0],         // matrix[1]
+        &[0, 0, 0, 0],         // matrix[2]
+        &[0, 0, 0, 0],         // matrix[3]
+        &[0, 1, 0, 0],         // matrix[4]
+        &[0, 0, 0, 0],         // matrix[5]
+        &[0, 0, 0, 0],         // matrix[6]
+        &[0, 0, 0, 0],         // matrix[7]
+        &[64, 0, 0, 0],        // matrix[8]
+        &[0; 24],              // pre defined
+        &[255, 255, 255, 255], // next track ID
     ];
     EXAMPLE_MOOV.concat()
 }
