@@ -300,8 +300,10 @@ impl EntropyCodedImage {
     ) -> Result<Self, Error> {
         let color_cache = ColorCache::read(reader).while_parsing_type()?;
         let codes = PrefixCodeGroup::read(reader, &color_cache).while_parsing_type()?;
-        let argb_readahead_bits = codes.argb_readahead_bits();
-        let readahead_bits = codes.readahead_bits();
+        let green_readahead_bits = codes.green_readahead_bits();
+        let arb_readahead_bits = codes.arb_readahead_bits();
+        let backref_readahead_bits = codes.backref_readahead_bits();
+        let readahead_bits = green_readahead_bits + arb_readahead_bits.max(backref_readahead_bits);
 
         let len = width.saturating_mul(height);
         let mut pixel_idx = 0;
@@ -314,7 +316,7 @@ impl EntropyCodedImage {
                     let color = Color::buf_read(reader, symbol as u8, &codes).while_parsing_type()?;
                     log::debug!("color: {color}");
                     fun(color)?;
-                    if argb_readahead_bits == 0 {
+                    if green_readahead_bits + arb_readahead_bits == 0 {
                         pixel_idx = len.get();
                     } else {
                         pixel_idx += 1;
@@ -344,7 +346,11 @@ impl EntropyCodedImage {
                         ParseError::InvalidInput,
                         ColorCacheIndexOutOfBounds(color_cache_index, color_cache.len()),
                     );
-                    pixel_idx += 1;
+                    if green_readahead_bits == 0 {
+                        pixel_idx = len.get();
+                    } else {
+                        pixel_idx += 1;
+                    }
                 }
             }
         }
@@ -600,16 +606,16 @@ impl PrefixCodeGroup {
         Ok(T::new(tree))
     }
 
-    pub fn argb_readahead_bits(&self) -> u32 {
-        self.alpha.tree.longest_code_len()
-            + self.red.tree.longest_code_len()
-            + self.green.tree.longest_code_len()
-            + self.blue.tree.longest_code_len()
+    pub fn green_readahead_bits(&self) -> u32 {
+        self.green.tree.longest_code_len()
     }
 
-    pub fn readahead_bits(&self) -> u32 {
-        self.argb_readahead_bits()
-            .max(self.green.tree.longest_code_len() + BackReference::readahead_bits(self))
+    pub fn arb_readahead_bits(&self) -> u32 {
+        self.alpha.tree.longest_code_len() + self.red.tree.longest_code_len() + self.blue.tree.longest_code_len()
+    }
+
+    pub fn backref_readahead_bits(&self) -> u32 {
+        self.green.tree.longest_code_len() + BackReference::readahead_bits(self)
     }
 }
 
