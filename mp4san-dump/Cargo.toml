@@ -1,0 +1,16 @@
+[package]
+name = "mp4san-dump"
+description = "Sample utilities built on top of mp4san to synchronously dump frames"
+version.workspace = true
+edition.workspace = true
+
+publish = false
+
+[dependencies]
+mp4san = { path = "../mp4san" }
+mediasan-common = { path = "../common" }
+
+bytes = "1.3.0"
+env_logger = "0.10.0"
+futures-util = { version = "0.3.28", default-features = false, features = ["io"] }
+log = "0.4.17"
