@@ -12,7 +12,6 @@ use derive_more::{Deref, DerefMut, From};
 use derive_where::derive_where;
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clonable::clonable;
-use futures_util::io::BufReader;
 use futures_util::{AsyncRead, AsyncReadExt};
 use mediasan_common::error::WhileParsingType;
 use mediasan_common::{AsyncSkipExt, ResultExt};
@@ -116,11 +115,9 @@ impl<T: ParsedBox + ?Sized> Mp4Box<T> {
     }
 
     /// Read and parse a box's data assuming its header has already been read.
-    pub(crate) async fn read_data<R>(
-        mut reader: Pin<&mut BufReader<R>>,
-        header: BoxHeader,
-        max_size: u64,
-    ) -> StdResult<Self, Error>
+    ///
+    /// It is highly recommended that `R` be a buffered reader.
+    pub async fn read_data<R>(mut reader: Pin<&mut R>, header: BoxHeader, max_size: u64) -> StdResult<Self, Error>
     where
         R: AsyncRead + AsyncSkip,
         T: ParseBox,
