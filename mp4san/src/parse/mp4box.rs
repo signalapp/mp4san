@@ -437,7 +437,7 @@ impl<C, V: ParseBoxes> From<Boxes<V>> for BoundedBoxes<C, V> {
     }
 }
 
-impl<C: Mp4Prim + Into<u32>, V: ParseBoxes> Mp4Value for BoundedBoxes<C, V> {
+impl<C: Mp4Prim + Into<u32> + TryFrom<u32>, V: ParseBoxes> Mp4Value for BoundedBoxes<C, V> {
     fn parse(buf: &mut BytesMut) -> Result<Self, ParseError> {
         let count = C::parse(&mut *buf)?;
         let boxes = Boxes::parse(&mut *buf)?;
@@ -446,11 +446,11 @@ impl<C: Mp4Prim + Into<u32>, V: ParseBoxes> Mp4Value for BoundedBoxes<C, V> {
     }
 
     fn encoded_len(&self) -> u64 {
-        <u32 as Mp4Prim>::ENCODED_LEN + self.boxes.encoded_len()
+        C::ENCODED_LEN + self.boxes.encoded_len()
     }
 
     fn put_buf<B: BufMut>(&self, mut buf: B) {
-        buf.put_mp4_value(&(self.boxes.len() as u32));
+        buf.put_mp4_value(&C::try_from(self.boxes.len() as u32).unwrap_or_else(|_| panic!()));
         self.boxes.put_buf(buf);
     }
 }
