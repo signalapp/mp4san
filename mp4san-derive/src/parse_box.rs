@@ -25,7 +25,9 @@ pub(crate) fn derive(input: Structure) -> TokenStream {
             field.span() => {
                 #[allow(clippy::let_and_return)]
                 let parsed = Mp4Value::parse(&mut *buf).while_parsing_field(<#ident>::NAME, stringify!(#field_ident));
-                #check_buf_empty
+                if parsed.is_ok() {
+                    #check_buf_empty
+                }
                 parsed
             }
         }
