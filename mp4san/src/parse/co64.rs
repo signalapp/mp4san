@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use super::{ArrayEntryMut, BoundedArray, ConstFullBoxHeader, ParseBox, ParsedBox};
+use super::{ArrayEntry, ArrayEntryMut, BoundedArray, ConstFullBoxHeader, ParseBox, ParsedBox};
 
 #[derive(Clone, Debug, Default, ParseBox, ParsedBox)]
 #[box_type = "co64"]
@@ -10,6 +10,10 @@ pub struct Co64Box {
 }
 
 impl Co64Box {
+    pub fn entries(&self) -> impl Iterator<Item = ArrayEntry<'_, u64>> + ExactSizeIterator + '_ {
+        self.entries.entries()
+    }
+
     pub fn entries_mut(&mut self) -> impl Iterator<Item = ArrayEntryMut<'_, u64>> + ExactSizeIterator + '_ {
         self.entries.entries_mut()
     }

@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use super::{ArrayEntryMut, BoundedArray, ConstFullBoxHeader, Mp4Prim, ParseBox, ParsedBox};
+use super::{ArrayEntry, ArrayEntryMut, BoundedArray, ConstFullBoxHeader, Mp4Prim, ParseBox, ParsedBox};
 
 #[derive(Clone, Debug, Default, ParseBox, ParsedBox)]
 #[box_type = "stsc"]
@@ -23,6 +23,10 @@ pub enum Test {
 }
 
 impl StscBox {
+    pub fn entries(&self) -> impl ExactSizeIterator<Item = ArrayEntry<'_, StscEntry>> + '_ {
+        self.entries.entries()
+    }
+
     pub fn entries_mut(&mut self) -> impl ExactSizeIterator<Item = ArrayEntryMut<'_, StscEntry>> + '_ {
         self.entries.entries_mut()
     }

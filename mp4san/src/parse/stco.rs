@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use super::{ArrayEntryMut, BoundedArray, ConstFullBoxHeader, ParseBox, ParsedBox};
+use super::{ArrayEntry, ArrayEntryMut, BoundedArray, ConstFullBoxHeader, ParseBox, ParsedBox};
 
 #[derive(Clone, Debug, Default, ParseBox, ParsedBox)]
 #[box_type = "stco"]
@@ -10,6 +10,10 @@ pub struct StcoBox {
 }
 
 impl StcoBox {
+    pub fn entries(&self) -> impl Iterator<Item = ArrayEntry<'_, u32>> + ExactSizeIterator + '_ {
+        self.entries.entries()
+    }
+
     pub fn entries_mut(&mut self) -> impl Iterator<Item = ArrayEntryMut<'_, u32>> + ExactSizeIterator + '_ {
         self.entries.entries_mut()
     }
