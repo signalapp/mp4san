@@ -139,7 +139,7 @@ impl<T: Mp4Prim, const N: usize> Mp4Prim for [T; N]
 where
     [T; N]: Default,
 {
-    const ENCODED_LEN: u64 = size_of::<Self>() as u64;
+    const ENCODED_LEN: u64 = T::ENCODED_LEN * N as u64;
 
     fn parse<B: Buf + AsRef<[u8]>>(mut buf: B) -> Result<Self, ParseError> {
         ensure_attach!(
