@@ -16,7 +16,7 @@ pub(crate) fn derive(input: Structure) -> TokenStream {
             quote! {
                 if !buf.is_empty() {
                     return Err(Report::from(ParseError::InvalidInput))
-                        .attach_printable("extra unparsed data")
+                        .attach_printable(format!("{} bytes of extra unparsed data", buf.len()))
                         .while_parsing_box(<#ident>::NAME);
                 }
             }
