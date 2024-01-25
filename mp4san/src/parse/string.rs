@@ -44,7 +44,7 @@ impl Mp4Value for Mp4String {
     }
 
     fn encoded_len(&self) -> u64 {
-        self.data.len() as u64
+        self.data.len() as u64 + 1
     }
 
     fn put_buf<B: BufMut>(&self, mut buf: B) {
