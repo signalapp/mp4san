@@ -61,11 +61,6 @@ jobs:
         if: ${{ env.TEST_DATA_SSH_KEY != '' }}
         run:  cargo test --verbose --features mp4san-test/ffmpeg,webpsan-test/libwebp test_data -- --show-output
 
-      - name: cargo clippy
-        uses: actions-rs/clippy-check@v1
-        with:
-          token: ${{ github.token }}
-
   fuzz-afl:
     name: fuzz-afl
     runs-on: ubuntu-latest
