@@ -8,7 +8,7 @@ use crate::util::StructureExt;
 pub(crate) fn derive(input: Structure) -> TokenStream {
     let parse = input.parse(|_variant, field, _idx| {
         quote_spanned! {
-            field.span() => Mp4Value::parse(&mut *buf).while_parsing_type::<Self>()
+            field.span() => Mp4Value::parse(&mut *buf).while_parsing_type()
         }
     });
     let encoded_len = input.fold(quote!(0), |acc, binding| quote! { #acc + #binding.encoded_len() });
