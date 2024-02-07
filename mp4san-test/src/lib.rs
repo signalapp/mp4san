@@ -117,12 +117,12 @@ pub fn example_mdat() -> Vec<u8> {
 
 pub fn example_moov() -> Vec<u8> {
     const EXAMPLE_MOOV: &[&[u8]] = &[
-        &[0, 0, 1, 109], // box size
+        &[0, 0, 1, 133], // box size
         b"moov",         // box type
         //
         // trak box (inside moov box)
         //
-        &[0, 0, 0, 249], // box size
+        &[0, 0, 1, 17], // box size
         b"trak",         // box type
         //
         // tkhd box (inside trak box)
@@ -154,7 +154,7 @@ pub fn example_moov() -> Vec<u8> {
         //
         // mdia box (inside trak box)
         //
-        &[0, 0, 0, 149], // box size
+        &[0, 0, 0, 173], // box size
         b"mdia",         // box type
         //
         // mdhd box (inside mdia box)
@@ -181,18 +181,19 @@ pub fn example_moov() -> Vec<u8> {
         //
         // minf box (inside mdia box)
         //
-        &[0, 0, 0, 76], // box size
+        &[0, 0, 0, 100], // box size
         b"minf",        // box type
         //
         // stbl box (inside minf box)
         //
-        &[0, 0, 0, 68], // box size
+        &[0, 0, 0, 92], // box size
         b"stbl",        // box type
         //
         // stsd box (inside stbl box)
         //
-        &[0, 0, 0, 12], // box size
+        &[0, 0, 0, 16], // box size
         b"stsd",        // box type
+        &[0, 0, 0, 0],  // box version & flags
         &[0, 0, 0, 0],  // entry count
         //
         // stts box (inside stbl box)
@@ -215,6 +216,15 @@ pub fn example_moov() -> Vec<u8> {
         b"stco",        // box type
         &[0, 0, 0, 0],  // box version & flags
         &[0, 0, 0, 0],  // entry count
+        //
+        // stsz box (inside stbl box)
+        //
+        &[0, 0, 0, 20], // box size
+        b"stsz",        // box type
+        &[0, 0, 0, 0],  // box version & flags
+        &[0, 0, 0, 0],  // sample size
+        &[0, 0, 0, 0],  // entry count
+        //
         //
         // mvhd box (inside moov box)
         //
