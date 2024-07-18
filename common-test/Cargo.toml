@@ -6,6 +6,6 @@ version = "0.1.0"
 publish = false
 
 [dependencies]
-env_logger = "0.10.0"
-libflate = "1.2.0"
+env_logger = "0.11.3"
+libflate = "2.1.0"
 log = "0.4.17"
