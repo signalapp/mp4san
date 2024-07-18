@@ -3,7 +3,7 @@ use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{quote, quote_spanned};
 use syn::spanned::Spanned;
-use syn::{parse_macro_input, Data, DeriveInput, Ident, Index, Lit, Meta};
+use syn::{parse_macro_input, Data, DeriveInput, Expr, Ident, Index, Lit};
 use uuid::Uuid;
 
 #[proc_macro_derive(ParseBox, attributes(box_type))]
@@ -129,7 +129,7 @@ fn derive_read_fn(input: &DeriveInput) -> TokenStream2 {
 }
 
 fn extract_box_type(input: &DeriveInput) -> TokenStream2 {
-    let mut iter = input.attrs.iter().filter(|attr| attr.path.is_ident("box_type"));
+    let mut iter = input.attrs.iter().filter(|attr| attr.path().is_ident("box_type"));
     let Some(attr) = iter.next() else {
         // When emitting compiler errors, no semicolon should be placed after `compile_error!()`:
         // doing so will generate extraneous errors (type mismatch errors, Rust parse errors, or the
@@ -141,8 +141,8 @@ fn extract_box_type(input: &DeriveInput) -> TokenStream2 {
             std::compile_error!("more than one `#[box_type]` attribute is not allowed")
         };
     }
-    let lit = match attr.parse_meta() {
-        Ok(Meta::NameValue(name_value)) => name_value.lit,
+    let lit = match attr.meta.require_name_value().map(|name_value| &name_value.value).ok() {
+        Some(Expr::Lit(lit)) => &lit.lit,
         _ => {
             return quote_spanned! { attr.span() =>
                 std::compile_error!("`box_type` attribute must be of the form `#[box_type = ...]`")
