@@ -127,7 +127,7 @@ impl<T: ParsedBox + ?Sized> Mp4Box<T> {
 
 impl<T: ParsedBox + ?Sized> Mp4Value for Mp4Box<T> {
     fn parse(mut buf: &mut BytesMut) -> Result<Self, ParseError> {
-        let parsed_header = BoxHeader::parse(&mut buf).attach_printable(WhileParsingType::new::<Self>())?;
+        let parsed_header = BoxHeader::parse(&mut buf, 0).attach_printable(WhileParsingType::new::<Self>())?;
         let data = BoxData::get_from_bytes_mut(buf, &parsed_header).attach_printable(WhileParsingType::new::<Self>())?;
         Ok(Self { parsed_header, data })
     }

@@ -90,6 +90,23 @@ pub struct Config {
     /// The default is 1 GiB.
     #[builder(default = "1024 * 1024 * 1024")]
     pub max_metadata_size: u64,
+    /// The cumulative MDAT box size
+    ///
+    /// The value is tightly associated with a specific
+    /// use case scenario in which the transcoder internally
+    /// generates a sequence of MDAT boxes, but delivers
+    /// them compounded as a single monolythic MDAT box.
+    ///
+    /// In order to avoid constantly updating the single
+    /// MDAT box size (which may be impossible when the
+    /// payload is continually encrypted and written to
+    /// the file), the transcoder instead does the following:
+    ///    a) writes the MDAT box size to be equal to the
+    ///       fixed zero value
+    ///    b) keeps accumulating the box size and passes
+    ///       it as config argument to mp4sanitizer
+    #[builder(default = 16672445)]
+    pub cumulative_mdat_box_size: u64,
 }
 
 /// Sanitized metadata returned by the sanitizer.
@@ -260,7 +277,7 @@ pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(
     while !reader.as_mut().fill_buf().await?.is_empty() {
         let start_pos = reader.as_mut().stream_position().await?;
 
-        let header = BoxHeader::read(&mut reader)
+        let header = BoxHeader::read(&mut reader, config.cumulative_mdat_box_size)
             .await
             .map_eof(|_| Error::Parse(report_attach!(ParseError::TruncatedBox, "while parsing box header")))?;
 

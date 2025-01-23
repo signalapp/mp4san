@@ -20,6 +20,9 @@ struct Args {
     #[clap(long, short = 'o')]
     output: Option<PathBuf>,
 
+    #[clap(long, short = 'c')]
+    cumulative_mdat_box_size: Option<u64>,
+
     /// Path to the file to test sanitization on.
     file: PathBuf,
 }
@@ -49,6 +52,11 @@ fn main() -> Result<(), anyhow::Error> {
     };
 
     let mut infile = File::open(&args.file).context("Error opening file")?;
+
+    let _cumulative_mdat_box_size = match args.cumulative_mdat_box_size {
+        Some(t) => t,
+        None => 0,
+    };
 
     match format {
         Format::Mp4 => match mp4san::sanitize(&mut infile).context("Error parsing mp4 file")? {
