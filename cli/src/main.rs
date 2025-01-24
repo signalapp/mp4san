@@ -53,19 +53,13 @@ fn main() -> Result<(), anyhow::Error> {
 
     let mut infile = File::open(&args.file).context("Error opening file")?;
 
-    let _cumulative_mdat_box_size = match args.cumulative_mdat_box_size {
-        Some(t) => t,
-        None => 0,
-    };
-
     match format {
         Format::Mp4 => {
             let analysis_result = match args.cumulative_mdat_box_size {
                 Some(t) => {
-                    let mut config = Config::default();
-                    config.cumulative_mdat_box_size = t;
+                    let config = Config { cumulative_mdat_box_size: t, ..Default::default() };
                     mp4san::sanitize_with_config(&mut infile, config).context("Error parsing mp4 file")?
-                },
+                }
                 None => mp4san::sanitize(&mut infile).context("Error parsing mp4 file")?,
             };
             match analysis_result {
@@ -85,7 +79,7 @@ fn main() -> Result<(), anyhow::Error> {
                     }
                 }
             }
-        },
+        }
         Format::Webp => {
             webpsan::sanitize(infile).context("Error parsing webp file")?;
             if let Some(output_path) = args.output {
