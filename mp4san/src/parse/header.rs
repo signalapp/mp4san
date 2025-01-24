@@ -132,7 +132,11 @@ impl BoxHeader {
     }
 
     pub fn overwrite_size(&mut self, actual_box_size: u64) {
-        self.box_size = BoxSize::Size(actual_box_size as u32);
+        if let Ok(t) = u32::try_from(actual_box_size) {
+            self.box_size = BoxSize::Size(t);
+        } else {
+            self.box_size = BoxSize::Ext(actual_box_size);
+        }
     }
 
     pub const fn encoded_len(&self) -> u64 {
