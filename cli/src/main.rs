@@ -21,7 +21,7 @@ struct Args {
     output: Option<PathBuf>,
 
     #[clap(long, short = 'c')]
-    cumulative_mdat_box_size: Option<u64>,
+    cumulative_mdat_box_size: Option<u32>,
 
     /// Path to the file to test sanitization on.
     file: PathBuf,

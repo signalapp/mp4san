@@ -105,8 +105,14 @@ pub struct Config {
     ///       fixed zero value
     ///    b) keeps accumulating the box size and passes
     ///       it as config argument to mp4sanitizer
+    ///
+    /// IMPORTANT: given the special circumstances of
+    /// the use case scenario of transcoding on mobile
+    /// devices, the MDAT box size is expected to not
+    /// exceed the 32-bit max bytes limit. Hence the
+    /// cumulative_mdat_box_size is a 32-bit value
     #[builder(default = None)]
-    pub cumulative_mdat_box_size: Option<u64>,
+    pub cumulative_mdat_box_size: Option<u32>,
 }
 
 /// Sanitized metadata returned by the sanitizer.
