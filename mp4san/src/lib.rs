@@ -105,7 +105,7 @@ pub struct Config {
     ///       fixed zero value
     ///    b) keeps accumulating the box size and passes
     ///       it as config argument to mp4sanitizer
-    #[builder(default = 16672445)]
+    #[builder(default = 0)]
     pub cumulative_mdat_box_size: u64,
 }
 
