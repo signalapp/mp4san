@@ -105,8 +105,8 @@ pub struct Config {
     ///       fixed zero value
     ///    b) keeps accumulating the box size and passes
     ///       it as config argument to mp4sanitizer
-    #[builder(default = 0)]
-    pub cumulative_mdat_box_size: u64,
+    #[builder(default = None)]
+    pub cumulative_mdat_box_size: Option<u64>,
 }
 
 /// Sanitized metadata returned by the sanitizer.
@@ -323,8 +323,8 @@ pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(
             }
 
             BoxType::MDAT => {
-                if config.cumulative_mdat_box_size != 0 {
-                    header.overwrite_size(config.cumulative_mdat_box_size);
+                if let Some(t) = config.cumulative_mdat_box_size {
+                    header.overwrite_size(t);
                 }
 
                 let box_size = skip_box(reader.as_mut(), &header).await? + header.encoded_len();

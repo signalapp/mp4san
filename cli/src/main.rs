@@ -57,7 +57,7 @@ fn main() -> Result<(), anyhow::Error> {
         Format::Mp4 => {
             let analysis_result = match args.cumulative_mdat_box_size {
                 Some(t) => {
-                    let config = Config { cumulative_mdat_box_size: t, ..Default::default() };
+                    let config = Config { cumulative_mdat_box_size: Some(t), ..Default::default() };
                     mp4san::sanitize_with_config(&mut infile, config).context("Error parsing mp4 file")?
                 }
                 None => mp4san::sanitize(&mut infile).context("Error parsing mp4 file")?,
