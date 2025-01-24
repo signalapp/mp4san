@@ -277,7 +277,7 @@ pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(
     while !reader.as_mut().fill_buf().await?.is_empty() {
         let start_pos = reader.as_mut().stream_position().await?;
 
-        let header = BoxHeader::read(&mut reader, config.cumulative_mdat_box_size)
+        let mut header = BoxHeader::read(&mut reader)
             .await
             .map_eof(|_| Error::Parse(report_attach!(ParseError::TruncatedBox, "while parsing box header")))?;
 
@@ -323,6 +323,10 @@ pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(
             }
 
             BoxType::MDAT => {
+                if config.cumulative_mdat_box_size != 0 {
+                    header.overwrite_size(config.cumulative_mdat_box_size);
+                }
+
                 let box_size = skip_box(reader.as_mut(), &header).await? + header.encoded_len();
                 log::info!("mdat @ 0x{start_pos:08x}: {box_size} bytes");
 

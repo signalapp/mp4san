@@ -91,8 +91,8 @@ impl BoxHeader {
         Self { box_type, box_size: BoxSize::UntilEof }
     }
 
-    pub fn parse<B: Buf + Unpin>(input: B, cumulative_mdat_box_size: u64) -> Result<Self, ParseError> {
-        Self::read(buf_async_reader(input), cumulative_mdat_box_size)
+    pub fn parse<B: Buf + Unpin>(input: B) -> Result<Self, ParseError> {
+        Self::read(buf_async_reader(input))
             .now_or_never()
             .unwrap()
             .map_err(|err| {
@@ -101,7 +101,7 @@ impl BoxHeader {
             })
     }
 
-    pub(crate) async fn read<R: AsyncRead>(input: R, cumulative_mdat_box_size: u64) -> io::Result<Self> {
+    pub(crate) async fn read<R: AsyncRead>(input: R) -> io::Result<Self> {
         pin_mut!(input);
 
         let mut size = [0; 4];
@@ -110,13 +110,7 @@ impl BoxHeader {
         let name = FourCC::read(&mut input).await?;
 
         let size = match u32::from_be_bytes(size) {
-            0 => {
-                if cumulative_mdat_box_size != 0 {
-                    BoxSize::Size(cumulative_mdat_box_size as u32)
-                } else {
-                    BoxSize::UntilEof
-                }
-            }
+            0 => BoxSize::UntilEof,
             1 => {
                 let mut size = [0; 8];
                 input.read_exact(&mut size).await?;
@@ -135,6 +129,10 @@ impl BoxHeader {
         };
 
         Ok(Self { box_type: name, box_size: size })
+    }
+
+    pub fn overwrite_size(&mut self, actual_box_size: u64) {
+        self.box_size = BoxSize::Size(actual_box_size as u32);
     }
 
     pub const fn encoded_len(&self) -> u64 {

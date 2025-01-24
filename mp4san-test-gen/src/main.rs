@@ -34,14 +34,14 @@ fn main() -> Result<(), anyhow::Error> {
         reader
             .read_exact(&mut header_data)
             .context("Error reading input file")?;
-        let header = match BoxHeader::parse(&header_data[..], 0) {
+        let header = match BoxHeader::parse(&header_data[..]) {
             Ok(header) => header,
             Err(_) => {
                 header_data.extend([0; 8]);
                 reader
                     .read_exact(&mut header_data[8..])
                     .context("Error reading input file")?;
-                BoxHeader::parse(&header_data[..], 0).context("Error reading input file")?
+                BoxHeader::parse(&header_data[..]).context("Error reading input file")?
             }
         };
         encoder.write_all(&header_data).context("Error writing to output")?;
