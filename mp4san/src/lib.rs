@@ -329,8 +329,10 @@ pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(
             }
 
             BoxType::MDAT => {
-                if let Some(t) = config.cumulative_mdat_box_size {
-                    header.overwrite_size(t);
+                if let Ok(None) = header.box_data_size() {
+                    if let Some(t) = config.cumulative_mdat_box_size {
+                        header.overwrite_size(t);
+                    }
                 }
 
                 let box_size = skip_box(reader.as_mut(), &header).await? + header.encoded_len();
