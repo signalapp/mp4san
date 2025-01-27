@@ -132,6 +132,7 @@ impl BoxHeader {
     }
 
     pub fn overwrite_size(&mut self, actual_box_size: u32) {
+        assert_eq!(self.box_size, BoxSize::UntilEof);
         self.box_size = BoxSize::Size(actual_box_size);
     }
 
