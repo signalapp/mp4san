@@ -832,4 +832,14 @@ mod test {
             assert_matches!(err.into_inner(), ParseError::InvalidBoxLayout);
         });
     }
+
+    #[test]
+    fn cumulative_mdat_box_size() {
+        let test_spec = test_mp4().mdat_data_until_eof().build_spec().unwrap();
+        let config = Config::builder()
+            .max_metadata_size(test_spec.moov().build().encoded_len())
+            .cumulative_mdat_box_size(Some(14))
+            .build();
+        test_spec.build().sanitize_ok_with_config(config);
+    }
 }
