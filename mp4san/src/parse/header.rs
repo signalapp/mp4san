@@ -131,6 +131,11 @@ impl BoxHeader {
         Ok(Self { box_type: name, box_size: size })
     }
 
+    pub fn overwrite_size(&mut self, actual_box_size: u32) {
+        assert_eq!(self.box_size, BoxSize::UntilEof);
+        self.box_size = BoxSize::Size(actual_box_size);
+    }
+
     pub const fn encoded_len(&self) -> u64 {
         let mut size = FourCC::size() + size_of::<u32>() as u64;
         if let BoxSize::Ext(_) = self.box_size {

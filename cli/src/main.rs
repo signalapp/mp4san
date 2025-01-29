@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use clap::{Parser as _, ValueEnum};
-use mp4san::SanitizedMetadata;
+use mp4san::{Config, SanitizedMetadata};
 
 #[derive(clap::Parser)]
 struct Args {
@@ -19,6 +19,9 @@ struct Args {
     /// Path to the file to write sanitized output.
     #[clap(long, short = 'o')]
     output: Option<PathBuf>,
+
+    #[clap(long, short = 'c')]
+    cumulative_mdat_box_size: Option<u32>,
 
     /// Path to the file to test sanitization on.
     file: PathBuf,
@@ -51,23 +54,26 @@ fn main() -> Result<(), anyhow::Error> {
     let mut infile = File::open(&args.file).context("Error opening file")?;
 
     match format {
-        Format::Mp4 => match mp4san::sanitize(&mut infile).context("Error parsing mp4 file")? {
-            SanitizedMetadata { metadata: Some(metadata), data } => {
-                if let Some(output_path) = args.output {
-                    let mut outfile = File::create(output_path).context("Error opening output file")?;
-                    outfile.write(&metadata).context("Error writing output")?;
-                    infile
-                        .seek(io::SeekFrom::Start(data.offset))
-                        .context("Error seeking input")?;
-                    io::copy(&mut infile.take(data.len), &mut outfile).context("Error copying input to output")?;
+        Format::Mp4 => {
+            let config = Config { cumulative_mdat_box_size: args.cumulative_mdat_box_size, ..Default::default() };
+            match mp4san::sanitize_with_config(&mut infile, config).context("Error parsing mp4 file")? {
+                SanitizedMetadata { metadata: Some(metadata), data } => {
+                    if let Some(output_path) = args.output {
+                        let mut outfile = File::create(output_path).context("Error opening output file")?;
+                        outfile.write(&metadata).context("Error writing output")?;
+                        infile
+                            .seek(io::SeekFrom::Start(data.offset))
+                            .context("Error seeking input")?;
+                        io::copy(&mut infile.take(data.len), &mut outfile).context("Error copying input to output")?;
+                    }
+                }
+                SanitizedMetadata { metadata: None, .. } => {
+                    if let Some(output_path) = args.output {
+                        fs::copy(&args.file, output_path).context("Error writing output")?;
+                    }
                 }
             }
-            SanitizedMetadata { metadata: None, .. } => {
-                if let Some(output_path) = args.output {
-                    fs::copy(&args.file, output_path).context("Error writing output")?;
-                }
-            }
-        },
+        }
         Format::Webp => {
             webpsan::sanitize(infile).context("Error parsing webp file")?;
             if let Some(output_path) = args.output {

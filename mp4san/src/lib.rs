@@ -90,6 +90,29 @@ pub struct Config {
     /// The default is 1 GiB.
     #[builder(default = "1024 * 1024 * 1024")]
     pub max_metadata_size: u64,
+    /// The cumulative MDAT box size
+    ///
+    /// The value is tightly associated with a specific
+    /// use case scenario in which the transcoder internally
+    /// generates a sequence of MDAT boxes, but delivers
+    /// them compounded as a single monolythic MDAT box.
+    ///
+    /// In order to avoid constantly updating the single
+    /// MDAT box size (which may be impossible when the
+    /// payload is continually encrypted and written to
+    /// the file), the transcoder instead does the following:
+    ///    a) writes the MDAT box size to be equal to the
+    ///       fixed zero value
+    ///    b) keeps accumulating the box size and passes
+    ///       it as config argument to mp4sanitizer
+    ///
+    /// IMPORTANT: given the special circumstances of
+    /// the use case scenario of transcoding on mobile
+    /// devices, the MDAT box size is expected to not
+    /// exceed the 32-bit max bytes limit. Hence the
+    /// cumulative_mdat_box_size is a 32-bit value
+    #[builder(default = None)]
+    pub cumulative_mdat_box_size: Option<u32>,
 }
 
 /// Sanitized metadata returned by the sanitizer.
@@ -260,7 +283,7 @@ pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(
     while !reader.as_mut().fill_buf().await?.is_empty() {
         let start_pos = reader.as_mut().stream_position().await?;
 
-        let header = BoxHeader::read(&mut reader)
+        let mut header = BoxHeader::read(&mut reader)
             .await
             .map_eof(|_| Error::Parse(report_attach!(ParseError::TruncatedBox, "while parsing box header")))?;
 
@@ -306,6 +329,12 @@ pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(
             }
 
             BoxType::MDAT => {
+                if let Ok(None) = header.box_data_size() {
+                    if let Some(t) = config.cumulative_mdat_box_size {
+                        header.overwrite_size(t);
+                    }
+                }
+
                 let box_size = skip_box(reader.as_mut(), &header).await? + header.encoded_len();
                 log::info!("mdat @ 0x{start_pos:08x}: {box_size} bytes");
 
@@ -802,5 +831,23 @@ mod test {
         assert_matches!(sanitize(test).unwrap_err(), Error::Parse(err) => {
             assert_matches!(err.into_inner(), ParseError::InvalidBoxLayout);
         });
+    }
+
+    #[test]
+    fn cumulative_mdat_box_size() {
+        let test_spec = test_mp4().mdat_data_until_eof().build_spec().unwrap();
+        let test_1 = test_spec.build();
+        let mdat_box_length = test_1.mdat.len as u32;
+
+        let config_bad = Config::builder().build();
+        assert_matches!(sanitize_with_config(test_1, config_bad).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.into_inner(), ParseError::MissingRequiredBox(_));
+        });
+
+        let test_2 = test_spec.build();
+        let config_good = Config::builder()
+            .cumulative_mdat_box_size(Some(mdat_box_length))
+            .build();
+        test_2.sanitize_ok_with_config(config_good);
     }
 }
