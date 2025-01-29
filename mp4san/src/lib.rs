@@ -836,10 +836,20 @@ mod test {
     #[test]
     fn cumulative_mdat_box_size() {
         let test_spec = test_mp4().mdat_data_until_eof().build_spec().unwrap();
-        let config = Config::builder()
-            .max_metadata_size(test_spec.moov().build().encoded_len())
-            .cumulative_mdat_box_size(Some(14))
+        let test_1 = test_spec.build();
+        let mdat_box_length = test_1.mdat.len as u32;
+
+        let config_bad = Config::builder()
+            .cumulative_mdat_box_size(Some(mdat_box_length + 1))
             .build();
-        test_spec.build().sanitize_ok_with_config(config);
+        assert_matches!(sanitize_with_config(test_1, config_bad).unwrap_err(), Error::Parse(err) => {
+            assert_matches!(err.into_inner(), ParseError::TruncatedBox);
+        });
+
+        let test_2 = test_spec.build();
+        let config_good = Config::builder()
+            .cumulative_mdat_box_size(Some(mdat_box_length))
+            .build();
+        test_2.sanitize_ok_with_config(config_good);
     }
 }
