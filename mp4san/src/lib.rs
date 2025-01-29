@@ -839,11 +839,9 @@ mod test {
         let test_1 = test_spec.build();
         let mdat_box_length = test_1.mdat.len as u32;
 
-        let config_bad = Config::builder()
-            .cumulative_mdat_box_size(Some(mdat_box_length + 1))
-            .build();
+        let config_bad = Config::builder().build();
         assert_matches!(sanitize_with_config(test_1, config_bad).unwrap_err(), Error::Parse(err) => {
-            assert_matches!(err.into_inner(), ParseError::TruncatedBox);
+            assert_matches!(err.into_inner(), ParseError::MissingRequiredBox(_));
         });
 
         let test_2 = test_spec.build();
