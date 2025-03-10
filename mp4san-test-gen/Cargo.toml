@@ -6,9 +6,9 @@ version = "0.1.0"
 publish = false
 
 [dependencies]
-anyhow = "1.0.68"
-clap = { version = "4.0.32", features = ["derive"] }
-env_logger = "0.11.3"
-libflate = "2.1.0"
-log = "0.4.17"
+anyhow = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+env_logger = { workspace = true }
+libflate = { workspace = true }
+log = { workspace = true }
 mp4san = { path = "../mp4san" }
