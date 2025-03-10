@@ -24,7 +24,7 @@ bitflags = { workspace = true }
 bitstream-io = { workspace = true }
 bytes = { workspace = true }
 derive_builder = { workspace = true }
-derive_more = { workspace = true }
+derive_more = { workspace = true, features = ["display"] }
 log = { workspace = true }
 mediasan-common = { path = "../common", version = "=0.5.3" }
 num-integer = { workspace = true }

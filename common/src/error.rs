@@ -40,12 +40,12 @@ pub struct Report<E: ReportableError> {
 
 /// A [`Display`]-able indicating there was extra trailing input after parsing.
 #[derive(Clone, Copy, Debug, Display)]
-#[display(fmt = "extra unparsed input")]
+#[display("extra unparsed input")]
 pub struct ExtraUnparsedInput;
 
 /// A [`Display`]-able indicating an error occurred while parsing a certain type.
 #[derive(Clone, Copy, Debug, Display)]
-#[display(fmt = "while parsing value of type `{}`", _0)]
+#[display("while parsing value of type `{}`", _0)]
 pub struct WhileParsingType(&'static str);
 
 /// A convenience type alias for a [`Result`](std::result::Result) containing an error wrapped by a [`Report`].
@@ -70,7 +70,7 @@ pub struct ReportStack {
 
 /// A null error stack which ignores all data attached to it.
 #[derive(Clone, Copy, Debug, Display)]
-#[display(fmt = "")]
+#[display("")]
 pub struct NullReportStack;
 
 /// A trait for error types which can be used in a [`Report`].
@@ -95,7 +95,7 @@ pub trait ReportableErrorStack: Display {
 //
 
 #[derive(derive_more::Display)]
-#[display(fmt = "{message} at {location}")]
+#[display("{message} at {location}")]
 struct ReportEntry {
     message: Box<dyn Display + Send + Sync + 'static>,
     location: &'static Location<'static>,

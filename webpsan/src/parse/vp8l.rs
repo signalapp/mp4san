@@ -31,7 +31,7 @@ pub struct Vp8lChunk {
 //
 
 #[derive(Clone, Copy, Debug, Display)]
-#[display(fmt = "invalid VP8L signature `0x{_0:x}` != `0x{}`", Vp8lChunk::SIGNATURE)]
+#[display("invalid VP8L signature `0x{_0:x}` != `0x{}`", Vp8lChunk::SIGNATURE)]
 struct InvalidSignature(u8);
 
 //

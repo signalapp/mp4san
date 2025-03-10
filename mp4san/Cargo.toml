@@ -18,7 +18,7 @@ exclude.workspace = true
 bytes = { workspace = true }
 derive-where = { workspace = true }
 derive_builder = { workspace = true }
-derive_more = { workspace = true }
+derive_more = { workspace = true, features = ["display", "from"] }
 downcast-rs = { workspace = true }
 dyn-clonable = { workspace = true }
 futures-util = { workspace = true, features = ["io"] }

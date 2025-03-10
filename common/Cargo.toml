@@ -16,6 +16,6 @@ exclude.workspace = true
 
 [dependencies]
 bytes = { workspace = true }
-derive_more = { workspace = true }
+derive_more = { workspace = true, features = ["deref", "deref_mut", "display"] }
 futures-util = { workspace = true, features = ["io"] }
 thiserror = { workspace = true }

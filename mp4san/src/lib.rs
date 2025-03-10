@@ -143,7 +143,7 @@ pub const COMPATIBLE_BRAND: FourCC = FourCC { value: *b"isom" };
 //
 
 #[derive(Clone, Copy, Debug, Display)]
-#[display(fmt = "box data too large: {} > {}", _0, _1)]
+#[display("box data too large: {} > {}", _0, _1)]
 struct BoxDataTooLarge(u64, u64);
 
 const MAX_FTYP_SIZE: u64 = 1024;

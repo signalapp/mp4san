@@ -26,7 +26,7 @@ pub struct CanonicalHuffmanTree<E: Endianness, S: Clone> {
 }
 
 #[derive(Display)]
-#[display(fmt = "invalid lz77 prefix code `{_0}`")]
+#[display("invalid lz77 prefix code `{_0}`")]
 struct InvalidLz77PrefixCode(u16);
 
 pub const LZ77_MAX_LEN: u16 = (LZ77_MAX_SYMBOL - 2) >> 1;
