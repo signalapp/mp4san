@@ -77,23 +77,23 @@ pub trait __ParseResultExt: ResultExt + Sized {
 pub(crate) use self::__ParseResultExt as ParseResultExt;
 
 #[derive(Clone, Copy, Debug, Display)]
-#[display(fmt = "multiple `{}` boxes", _0)]
+#[display("multiple `{}` boxes", _0)]
 pub(crate) struct MultipleBoxes(pub(crate) BoxType);
 
 #[derive(Clone, Copy, Debug, Display)]
-#[display(fmt = "while parsing `{}` box", _0)]
+#[display("while parsing `{}` box", _0)]
 pub(crate) struct WhileParsingBox(pub(crate) BoxType);
 
 #[derive(Clone, Copy, Debug, Display)]
-#[display(fmt = "while parsing `{}` box field `{}`", _0, _1)]
+#[display("while parsing `{}` box field `{}`", _0, _1)]
 pub(crate) struct WhileParsingField<T>(pub(crate) BoxType, pub(crate) T);
 
 #[derive(Clone, Copy, Debug, Display)]
-#[display(fmt = "while parsing `{}` box child `{}`", _0, _1)]
+#[display("while parsing `{}` box child `{}`", _0, _1)]
 pub(crate) struct WhileParsingChild(pub(crate) BoxType, pub(crate) BoxType);
 
 #[derive(Clone, Copy, Debug, Display)]
-#[display(fmt = "where `{} = {}`", _0, _1)]
+#[display("where `{} = {}`", _0, _1)]
 pub(crate) struct WhereEq<T, U>(pub(crate) T, pub(crate) U);
 
 impl ReportableError for ParseError {

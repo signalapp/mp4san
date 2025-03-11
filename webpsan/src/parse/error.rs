@@ -58,19 +58,19 @@ pub(crate) trait ParseResultExt: ResultExt + Sized {
 }
 
 #[derive(Clone, Copy, Debug, Display)]
-#[display(fmt = "multiple `{}` chunks", _0)]
+#[display("multiple `{}` chunks", _0)]
 pub(crate) struct MultipleChunks(pub(crate) FourCC);
 
 #[derive(Clone, Copy, Debug, Display)]
-#[display(fmt = "expected `{}` chunk", _0)]
+#[display("expected `{}` chunk", _0)]
 pub(crate) struct ExpectedChunk(pub(crate) FourCC);
 
 #[derive(Clone, Copy, Debug, Display)]
-#[display(fmt = "while parsing `{}` chunk", _0)]
+#[display("while parsing `{}` chunk", _0)]
 pub(crate) struct WhileParsingChunk(pub(crate) FourCC);
 
 #[derive(Clone, Copy, Debug, Display)]
-#[display(fmt = "while parsing `{}` chunk field `{}`", _0, _1)]
+#[display("while parsing `{}` chunk field `{}`", _0, _1)]
 pub(crate) struct WhileParsingField<T>(pub(crate) FourCC, pub(crate) T);
 
 impl ReportableError for ParseError {

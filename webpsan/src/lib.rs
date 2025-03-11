@@ -72,7 +72,7 @@ trait ReadSkip: Read + Skip {}
 type DynChunkReader<'a> = ChunkReader<dyn ReadSkip + 'a>;
 
 #[derive(Clone, Copy, Debug, Display)]
-#[display(fmt = "frame dimensions `{_0}`x`{_1}` do not match canvas dimensions `{_2}`x`{_3}`")]
+#[display("frame dimensions `{_0}`x`{_1}` do not match canvas dimensions `{_2}`x`{_3}`")]
 struct FrameDimensionsMismatch(NonZeroU16, NonZeroU16, NonZeroU32, NonZeroU32);
 
 //

@@ -26,26 +26,26 @@ pub struct LosslessImage {
 
 #[derive(Clone, Display, PartialEq, Eq)]
 enum Transform {
-    #[display(fmt = "predictor transform: block size {block_size}")]
+    #[display("predictor transform: block size {block_size}")]
     Predictor { block_size: u16, _image: EntropyCodedImage },
-    #[display(fmt = "color transform: block size {block_size}")]
+    #[display("color transform: block size {block_size}")]
     Color { block_size: u16, _image: EntropyCodedImage },
-    #[display(fmt = "subtract green transform")]
+    #[display("subtract green transform")]
     SubtractGreen,
-    #[display(fmt = "color indexing transform: {} colors", "image.width")]
+    #[display("color indexing transform: {} colors", "image.width")]
     ColorIndexing { image: EntropyCodedImage },
 }
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Display, PartialEq, Eq, PartialOrd, Ord)]
 enum TransformType {
-    #[display(fmt = "predictor")]
+    #[display("predictor")]
     Predictor = 0b00,
-    #[display(fmt = "color")]
+    #[display("color")]
     Color = 0b01,
-    #[display(fmt = "subtract green")]
+    #[display("subtract green")]
     SubtractGreen = 0b10,
-    #[display(fmt = "color indexing")]
+    #[display("color indexing")]
     ColorIndexing = 0b11,
 }
 
@@ -59,14 +59,14 @@ struct EntropyCodedImage {
 struct SpatiallyCodedImage;
 
 #[derive(Clone, Copy, Debug, Display, PartialEq, Eq)]
-#[display(fmt = "distance {dist} length {len}")]
+#[display("distance {dist} length {len}")]
 struct BackReference {
     dist: NonZeroU32,
     len: NonZeroU32,
 }
 
 #[derive(Clone, Copy, Debug, Default, Display, PartialEq, Eq)]
-#[display(fmt = "({alpha}, {red}, {green}, {blue})")]
+#[display("({alpha}, {red}, {green}, {blue})")]
 struct Color {
     alpha: u8,
     red: u8,
@@ -81,9 +81,9 @@ struct ColorCache {
 
 #[derive(Clone, Display, PartialEq, Eq)]
 enum MetaPrefixCodes {
-    #[display(fmt = "single meta prefix code")]
+    #[display("single meta prefix code")]
     Single,
-    #[display(fmt = "multiple meta prefix codes: max code group {max_code_group}, block size {block_size}")]
+    #[display("multiple meta prefix codes: max code group {max_code_group}, block size {block_size}")]
     Multiple {
         block_size: u16,
         max_code_group: u16,
@@ -124,39 +124,39 @@ struct DistancePrefixCode {
 }
 
 #[derive(Clone, Copy, Debug, Display)]
-#[display(fmt = "out-of-bounds color cache index `{_0}` >= `{_1}`")]
+#[display("out-of-bounds color cache index `{_0}` >= `{_1}`")]
 struct ColorCacheIndexOutOfBounds(u16, u16);
 
 #[derive(Clone, Copy, Debug, Display)]
-#[display(fmt = "invalid back-reference distance `{_0}` at pixel `{_1}`")]
+#[display("invalid back-reference distance `{_0}` at pixel `{_1}`")]
 struct InvalidBackRefDistance(NonZeroU32, u32);
 
 #[derive(Clone, Copy, Debug, Display)]
-#[display(fmt = "invalid back-reference length `{_0}` at pixel `{_1}` with image length `{_2}`")]
+#[display("invalid back-reference length `{_0}` at pixel `{_1}` with image length `{_2}`")]
 struct InvalidBackRefLength(NonZeroU32, u32, u32);
 
 #[derive(Clone, Copy, Debug, Display)]
-#[display(fmt = "invalid code length repetition `{_0}` at `{_1}` with max symbols `{_2}`")]
+#[display("invalid code length repetition `{_0}` at `{_1}` with max symbols `{_2}`")]
 struct InvalidCodeLengthRepetition(u8, usize, u16);
 
 #[derive(Clone, Copy, Debug, Display)]
-#[display(fmt = "invalid color cache size `{_0}`")]
+#[display("invalid color cache size `{_0}`")]
 struct InvalidColorCacheSize(u8);
 
 #[derive(Clone, Copy, Debug, Display)]
-#[display(fmt = "invalid duplicate {_0} transform")]
+#[display("invalid duplicate {_0} transform")]
 struct InvalidDuplicateTransform(TransformType);
 
 #[derive(Clone, Copy, Debug, Display)]
-#[display(fmt = "invalid predictor `{_0}`")]
+#[display("invalid predictor `{_0}`")]
 struct InvalidPredictor(u8);
 
 #[derive(Clone, Copy, Debug, Display)]
-#[display(fmt = "invalid symbol count `{_0}` >= `{_1}`")]
+#[display("invalid symbol count `{_0}` >= `{_1}`")]
 struct InvalidSymbolCount(u16, u16);
 
 #[derive(Clone, Copy, Debug, Display)]
-#[display(fmt = "while parsing {_0} transform")]
+#[display("while parsing {_0} transform")]
 struct WhileParsingTransform(TransformType);
 
 //
