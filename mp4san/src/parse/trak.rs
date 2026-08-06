@@ -4,7 +4,7 @@ use crate::error::Result;
 
 use super::error::ParseResultExt;
 use super::mp4box::Boxes;
-use super::{BoxType, MdiaBox, ParseBox, ParseError, ParsedBox, StblCoMut};
+use super::{BoxType, MdiaBox, ParseBox, ParseError, ParsedBox, StblCoMut, StsdBox};
 
 #[derive(Clone, Debug, ParseBox, ParsedBox)]
 #[box_type = "trak"]
@@ -26,5 +26,9 @@ impl TrakBox {
 
     pub fn mdia_mut(&mut self) -> Result<&mut MdiaBox, ParseError> {
         self.children.get_one_mut().while_parsing_child(NAME, BoxType::MDIA)
+    }
+
+    pub fn stsd_mut(&mut self) -> Result<&mut StsdBox, ParseError> {
+        self.mdia_mut()?.minf_mut()?.stbl_mut()?.stsd_mut()
     }
 }

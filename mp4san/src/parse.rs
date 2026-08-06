@@ -28,6 +28,7 @@ pub use moov::MoovBox;
 pub use mp4box::{AnyMp4Box, BoxData, Boxes, BoxesValidator, Mp4Box, ParseBox, ParsedBox};
 pub use stbl::{StblBox, StblCoMut};
 pub use stco::StcoBox;
+pub use stsd::StsdBox;
 pub use trak::TrakBox;
 pub use value::{Mp4Value, Mp4ValueReaderExt, Mp4ValueWriterExt};
 

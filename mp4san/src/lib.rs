@@ -455,6 +455,8 @@ pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(
                         );
                     }
                 }
+                let stsd = trak?.stsd_mut()?;
+                println!("MILAN: stsd box {:?}", stsd);
             }
         }
     }

@@ -3,7 +3,7 @@
 use crate::error::Result;
 
 use super::error::{ParseResultExt, WhileParsingChild};
-use super::{BoxType, Boxes, Co64Box, ParseBox, ParseError, ParsedBox, StcoBox};
+use super::{BoxType, Boxes, Co64Box, ParseBox, ParseError, ParsedBox, StcoBox, StsdBox};
 
 #[derive(Clone, Debug, ParseBox, ParsedBox)]
 #[box_type = "stbl"]
@@ -20,6 +20,7 @@ pub enum StblCoMut<'a> {
 const NAME: BoxType = BoxType::STBL;
 const STCO: BoxType = BoxType::STCO;
 const CO64: BoxType = BoxType::CO64;
+const STSD: BoxType = BoxType::STSD;
 
 impl StblBox {
     #[cfg(test)]
@@ -47,6 +48,12 @@ impl StblBox {
                 .while_parsing_child(NAME, CO64)
                 .map(StblCoMut::Co64)
         }
+    }
+
+    pub fn stsd_mut(&mut self) -> Result<&mut StsdBox, ParseError> {
+        self.children
+            .get_one_mut()
+            .while_parsing_child(NAME, STSD)
     }
 }
 
