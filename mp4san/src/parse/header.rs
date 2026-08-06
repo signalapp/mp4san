@@ -242,6 +242,7 @@ box_type! {
     FREE,
     FTYP,
     HDLR,
+    HEV1,
     MDAT,
     MDHD,
     MDIA,

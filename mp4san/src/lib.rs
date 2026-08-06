@@ -535,7 +535,7 @@ mod test {
 
     use assert_matches::assert_matches;
 
-    use crate::parse::box_type::{CO64, FREE, FTYP, MDAT, MDIA, MECO, META, MINF, MOOV, SKIP, STBL, STCO, TRAK};
+    use crate::parse::box_type::{CO64, FREE, FTYP, MDAT, MDIA, MECO, META, MINF, MOOV, SKIP, STBL, STCO, STSD, TRAK};
     use crate::util::test::{
         init_logger, sanitized_data, test_ftyp, test_moov, test_mp4, write_test_mdat, ISOM, MP41, MP42, TEST_UUID,
     };

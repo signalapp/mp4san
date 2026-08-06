@@ -12,6 +12,7 @@ mod moov;
 mod mp4box;
 mod stbl;
 mod stco;
+mod stsd;
 mod trak;
 mod value;
 
