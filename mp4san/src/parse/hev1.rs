@@ -4,27 +4,24 @@ use crate::error::Result;
 
 use super::error::ParseResultExt;
 use super::mp4box::Boxes;
-use super::{BoxType, ParseBox, ParseError, ParsedBox, Hev1Box};
+use super::{BoxType, ParseBox, ParseError, ParsedBox};
 
 #[derive(Clone, Debug, ParseBox, ParsedBox)]
 #[box_type = "stsd"]
-pub struct StsdBox {
+pub struct Hev1Box {
     children: Boxes,
 }
 
-const NAME: BoxType = BoxType::STSD;
+const NAME: BoxType = BoxType::HEV1;
 
-impl StsdBox {
+impl Hev1Box {
     #[cfg(test)]
     pub(crate) fn with_children<C: Into<Boxes>>(children: C) -> Self {
         Self { children: children.into() }
     }
 
     pub fn hev1_mut(&mut self) -> Result<&mut Hev1Box, ParseError> {
-        println!("STSD");
-        for i in 0..self.children.boxes.len() {
-            println!("child[{}] = {:x?}", i, self.children.boxes[i].parsed_header.box_type());
-        }
+        println!("====> HEV1_MUT");
         self.children.get_one_mut().while_parsing_child(NAME, BoxType::HEV1)
     }
 }

@@ -362,13 +362,16 @@ pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(
                 let trak_count = moov_data.traks().count();
 
                 log::info!("moov @ 0x{start_pos:08x}: {trak_count} traks {chunk_count} chunks");
+
+                let hev1: Vec<_> = moov_data
+                    .traks()
+                    .map(|trak| Ok::<_, Report<_>>(trak?.hev1_mut()?))
+                    .collect();
+                println!("MILAN: hev1: {:?}", hev1);
                 moov = Some(read_moov);
                 moov_offset = Some(start_pos);
             }
 
-            BoxType::HEV1 => {
-                println!("MILAN: HEV1 caught");
-            }
             name @ (BoxType::META | BoxType::MECO) => {
                 let box_size = skip_box(reader.as_mut(), &header).await? + header.encoded_len();
                 log::info!("{name} @ 0x{start_pos:08x}: {box_size} bytes");
