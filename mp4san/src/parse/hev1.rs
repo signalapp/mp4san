@@ -7,7 +7,7 @@ use super::mp4box::Boxes;
 use super::{BoxType, ParseBox, ParseError, ParsedBox};
 
 #[derive(Clone, Debug, ParseBox, ParsedBox)]
-#[box_type = "stsd"]
+#[box_type = "hev1"]
 pub struct Hev1Box {
     children: Boxes,
 }

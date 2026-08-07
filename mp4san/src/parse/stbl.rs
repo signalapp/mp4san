@@ -30,6 +30,7 @@ impl StblBox {
     }
 
     pub fn co_mut(&mut self) -> Result<StblCoMut<'_>, ParseError> {
+        println!("MILAN inside co_mut()");
         for i in 0..self.children.boxes.len() {
             println!("child[{}] = {}", i, self.children.boxes[i].parsed_header.box_type());
         }
