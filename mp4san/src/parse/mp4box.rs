@@ -26,7 +26,7 @@ use super::{BoxHeader, BoxType, Mp4Value, ParseError};
 #[derive(Debug)]
 #[derive_where(Clone; BoxData<T>)]
 pub struct Mp4Box<T: ?Sized> {
-    parsed_header: BoxHeader,
+    pub parsed_header: BoxHeader,
     pub data: BoxData<T>,
 }
 
@@ -55,7 +55,7 @@ pub trait ParsedBox: Clone + Debug + Downcast {
 #[derive(From)]
 #[derive_where(Clone, Debug, Default)]
 pub struct Boxes<V = ()> {
-    boxes: Vec<AnyMp4Box>,
+    pub boxes: Vec<AnyMp4Box>,
     _validator: PhantomData<V>,
 }
 

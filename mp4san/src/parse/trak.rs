@@ -28,7 +28,7 @@ impl TrakBox {
         self.children.get_one_mut().while_parsing_child(NAME, BoxType::MDIA)
     }
 
-    pub fn stsd_mut(&mut self) -> Result<&mut StsdBox, ParseError> {
-        self.mdia_mut()?.minf_mut()?.stbl_mut()?.stsd_mut()
+    pub fn hev1_mut(&mut self) -> Result<&mut StsdBox, ParseError> {
+        self.mdia_mut()?.minf_mut()?.stbl_mut()?.stsd_mut()?.hev1_mut()
     }
 }

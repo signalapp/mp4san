@@ -243,6 +243,7 @@ box_type! {
     FTYP,
     HDLR,
     HEV1,
+    HVCC,
     MDAT,
     MDHD,
     MDIA,

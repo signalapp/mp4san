@@ -20,7 +20,11 @@ impl StsdBox {
         Self { children: children.into() }
     }
 
-    pub fn stsd_mut(&mut self) -> Result<&mut StsdBox, ParseError> {
+    pub fn hev1_mut(&mut self) -> Result<&mut StsdBox, ParseError> {
+        println!("STSD");
+        for i in 0..self.children.boxes.len() {
+            println!("child[{}] = {:x?}", i, self.children.boxes[i].parsed_header.box_type());
+        }
         self.children.get_one_mut().while_parsing_child(NAME, BoxType::HEV1)
     }
 }

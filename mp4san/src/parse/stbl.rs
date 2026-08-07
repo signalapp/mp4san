@@ -25,10 +25,14 @@ const STSD: BoxType = BoxType::STSD;
 impl StblBox {
     #[cfg(test)]
     pub(crate) fn with_children<C: Into<Boxes>>(children: C) -> Self {
+        println!("==> STBL with children");
         Self { children: children.into() }
     }
 
     pub fn co_mut(&mut self) -> Result<StblCoMut<'_>, ParseError> {
+        for i in 0..self.children.boxes.len() {
+            println!("child[{}] = {}", i, self.children.boxes[i].parsed_header.box_type());
+        }
         let have_stco = self.children.box_types().any(|box_type| box_type == STCO);
         let have_co64 = self.children.box_types().any(|box_type| box_type == CO64);
         ensure_attach!(
@@ -51,6 +55,7 @@ impl StblBox {
     }
 
     pub fn stsd_mut(&mut self) -> Result<&mut StsdBox, ParseError> {
+        println!("===> STSD_MUT");
         self.children
             .get_one_mut()
             .while_parsing_child(NAME, STSD)

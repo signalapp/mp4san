@@ -366,6 +366,9 @@ pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(
                 moov_offset = Some(start_pos);
             }
 
+            BoxType::HEV1 => {
+                println!("MILAN: HEV1 caught");
+            }
             name @ (BoxType::META | BoxType::MECO) => {
                 let box_size = skip_box(reader.as_mut(), &header).await? + header.encoded_len();
                 log::info!("{name} @ 0x{start_pos:08x}: {box_size} bytes");
@@ -435,28 +438,33 @@ pub async fn sanitize_async_with_config<R: AsyncRead + AsyncSkip>(
             log::info!("metadata: 0x{metadata_len:08x} bytes; displacing chunk offsets by 0x{mdat_displacement:08x}");
 
             for trak in &mut moov.data.parse()?.traks() {
-                let co = trak?.co_mut()?;
-                if let StblCoMut::Stco(stco) = co {
-                    for mut entry in &mut stco.entries_mut() {
-                        let value = entry.get().unwrap_or_else(|_| unreachable!());
-                        entry.set(
-                            checked_add_signed(value, mdat_displacement).ok_or_else(|| {
-                                report_attach!(ParseError::InvalidInput, "chunk offset not within mdat")
-                            })?,
-                        );
-                    }
-                } else if let StblCoMut::Co64(co64) = co {
-                    for mut entry in &mut co64.entries_mut() {
-                        let value = entry.get().unwrap_or_else(|_| unreachable!());
-                        entry.set(
-                            checked_add_signed(value, mdat_displacement.into()).ok_or_else(|| {
-                                report_attach!(ParseError::InvalidInput, "chunk offset not within mdat")
-                            })?,
-                        );
+                let trak = trak?;
+                {
+                    let co = trak.co_mut()?;
+                    if let StblCoMut::Stco(stco) = co {
+                        for mut entry in &mut stco.entries_mut() {
+                            let value = entry.get().unwrap_or_else(|_| unreachable!());
+                            entry.set(
+                                checked_add_signed(value, mdat_displacement).ok_or_else(|| {
+                                    report_attach!(ParseError::InvalidInput, "chunk offset not within mdat")
+                                })?,
+                            );
+                        }
+                    } else if let StblCoMut::Co64(co64) = co {
+                        for mut entry in &mut co64.entries_mut() {
+                            let value = entry.get().unwrap_or_else(|_| unreachable!());
+                            entry.set(
+                                checked_add_signed(value, mdat_displacement.into()).ok_or_else(|| {
+                                    report_attach!(ParseError::InvalidInput, "chunk offset not within mdat")
+                                })?,
+                            );
+                        }
                     }
                 }
-                let stsd = trak?.stsd_mut()?;
-                println!("MILAN: stsd box {:?}", stsd);
+
+                println!("====> trak.hev1_mut()");
+                let hev1 = trak.hev1_mut()?;
+                println!("MILAN: hev1 box {:?}", hev1);
             }
         }
     }
