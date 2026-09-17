@@ -23,8 +23,8 @@ downcast-rs = { workspace = true }
 dyn-clonable = { workspace = true }
 futures-util = { workspace = true, features = ["io"] }
 log = { workspace = true }
-mediasan-common = { path = "../common", version = "=0.5.3" }
-mp4san-derive = { path = "../mp4san-derive", version = "=0.5.3" }
+mediasan-common = { path = "../common", version = "=0.5.4" }
+mp4san-derive = { path = "../mp4san-derive", version = "=0.5.4" }
 paste = { workspace = true }
 thiserror = { workspace = true }
 
