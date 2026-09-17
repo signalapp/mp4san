@@ -206,7 +206,7 @@ fn sanitize_extended(reader: &mut DynChunkReader<'_>, vp8x: &Vp8xChunk, config: 
 
 fn sanitize_still(reader: &mut DynChunkReader<'_>, vp8x: &Vp8xChunk) -> Result<(), Error> {
     let mut alph = None;
-    if vp8x.flags.contains(Vp8xFlags::HAS_ALPH_CHUNK) {
+    if vp8x.flags.contains(Vp8xFlags::HAS_ALPH_CHUNK) && reader.peek_header()? == Some(ALPH) {
         let InputSpan { offset, len } = reader.read_header(ALPH)?;
         let read_alph @ AlphChunk { flags } = reader.parse_data()?;
         read_alph.sanitize_image_data(reader.data_reader(), vp8x)?;
@@ -621,15 +621,6 @@ mod test {
         let vp8x = test_vp8x().flags(Some(Vp8xFlags::empty())).clone();
         let test = test_webp().chunks([VP8X, ANMF]).vp8x(vp8x).build();
         assert_matches!(test.sanitize_invalid(), Error::Parse(err) => {
-            assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
-        });
-    }
-
-    #[test]
-    pub fn vp8x_alph_missing() {
-        let vp8x = test_vp8x().flags(Some(Vp8xFlags::HAS_ALPH_CHUNK)).clone();
-        let test = test_webp().chunks([VP8X, VP8L]).vp8x(vp8x).build();
-        assert_matches!(test.sanitize_non_compliant(), Error::Parse(err) => {
             assert_matches!(err.get_ref(), ParseError::InvalidChunkLayout, "{err:?}");
         });
     }
